@@ -135,6 +135,12 @@
       12%{ opacity: 1; }
       100%{ opacity: 0; transform: translate(-50%,-50%) scale(1.15) translate(var(--dx), var(--dy)); }
     }
+
+    @media (max-width: 560px) {
+      .card{ width: calc(100% - 26px); padding: 22px 18px; border-radius: 22px; }
+      h1{ font-size: 26px; }
+      .msg{ font-size: 17px; }
+    }
   </style>
 </head>
 <body>
@@ -143,7 +149,6 @@
     <p class="msg" id="greet"></p>
     <span class="sign" id="sign"></span>
 
-    <div class="tiny">左右滑动切换 · 轻点任意位置会爆出蓝色小心心</div>
     <div class="tiny" id="time"></div>
   </main>
 
@@ -177,7 +182,6 @@
       el.classList.add('pop');
     }
 
-    // deterministic shuffle index
     let idx = Math.floor(Math.random() * lines.length);
 
     function showAt(i) {
@@ -260,7 +264,6 @@
       const dy = e.clientY - startY;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
 
-      // Only treat as swipe when horizontal intention
       if (Math.abs(dx) > Math.abs(dy)) {
         e.preventDefault?.();
         const damp = Math.max(-340, Math.min(340, dx));
@@ -297,12 +300,12 @@
         h.className = 'bheart';
         const ang = (Math.PI * 2 * i) / n + (Math.random() * 0.35);
         const dist = 62 + Math.random() * 30;
-        const dx = Math.cos(ang) * dist;
-        const dy = Math.sin(ang) * dist;
+        const ddx = Math.cos(ang) * dist;
+        const ddy = Math.sin(ang) * dist;
         h.style.setProperty('--x', x + 'px');
         h.style.setProperty('--y', y + 'px');
-        h.style.setProperty('--dx', dx + 'px');
-        h.style.setProperty('--dy', dy + 'px');
+        h.style.setProperty('--dx', ddx + 'px');
+        h.style.setProperty('--dy', ddy + 'px');
         h.style.setProperty('--s', (0.85 + Math.random() * 0.8).toFixed(2));
         burst.appendChild(h);
         setTimeout(() => h.remove(), 1000);
@@ -315,7 +318,6 @@
     }, true);
 
     root.addEventListener('touchend', (e) => {
-      // Some mobile browsers won't emit click if preventDefault happened.
       if (moved > 18) return;
       const t = e.changedTouches && e.changedTouches[0];
       if (!t) return;
