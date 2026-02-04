@@ -252,8 +252,41 @@
       });
     }
 
-    // Configure your Worker endpoint here (after deploy)
+    // Option A: Cloudflare Worker endpoint (recommended)
     const API_BASE = localStorage.getItem('theo_notes_api_base') || '';
+    // Option B (fallback): store a GitHub token locally (NOT stored in repo, but still sensitive)
+    const GH_TOKEN = localStorage.getItem('theo_notes_gh_token') || '';
+    const GH_OWNER = 'xcuicui';
+    const GH_REPO = 'theo-notes-vault';
+
+    async function base64Utf8(str){
+      const bytes = new TextEncoder().encode(str);
+      let bin = '';
+      bytes.forEach(b => bin += String.fromCharCode(b));
+      return btoa(bin);
+    }
+
+    async function ghPutFile(path, contentBase64, message){
+      const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path).replaceAll('%2F','/')}`;
+      const headers = {
+        'authorization': `Bearer ${GH_TOKEN}`,
+        'accept': 'application/vnd.github+json',
+        'x-github-api-version': '2022-11-28',
+      };
+      let sha;
+      const getRes = await fetch(url, { headers });
+      if (getRes.ok) {
+        const j = await getRes.json();
+        sha = j && j.sha;
+      }
+      const putRes = await fetch(url, {
+        method: 'PUT',
+        headers: { ...headers, 'content-type': 'application/json' },
+        body: JSON.stringify({ message, content: contentBase64, branch: 'main', sha }),
+      });
+      if (!putRes.ok) throw new Error(await putRes.text());
+      return putRes.json();
+    }
 
     $('save').onclick = async () => {
       const text = $('text').value.trim();
@@ -290,35 +323,84 @@
         toast('写点什么或传张照片再保存哦～');
         return;
       }
-      if (!API_BASE) {
-        const base = prompt('请先粘贴你的 Worker API 地址（例如 https://xxx.workers.dev ）：');
-        if (!base) return;
-        localStorage.setItem('theo_notes_api_base', base.trim().replace(/\/$/,''));
+
+      // First try Worker mode if configured
+      if (API_BASE) {
+        const photos = [];
+        for (const f of files) {
+          const dataBase64 = await readFileAsBase64(f);
+          photos.push({ name: f.name, type: f.type, dataBase64 });
+        }
+
+        try {
+          const res = await fetch(API_BASE + '/save', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text, photos }),
+          });
+
+          if (!res.ok) {
+            const t = await res.text();
+            throw new Error(t);
+          }
+
+          $('text').value = '';
+          $('photos').value = '';
+          toast('已保存到 GitHub～');
+          return;
+        } catch (e) {
+          // fall through to direct token mode
+          console.warn('worker save failed', e);
+        }
+      }
+
+      // Fallback: direct GitHub API with token stored locally
+      if (!GH_TOKEN) {
+        const tok = prompt('无法连接到 Worker。\n\n可选方案：粘贴你的 GitHub Token（仅保存在本机浏览器，不会写进仓库）。\n\n注意：这是敏感信息，不要在公开设备使用。');
+        if (!tok) return;
+        localStorage.setItem('theo_notes_gh_token', tok.trim());
         location.reload();
         return;
       }
 
-      const photos = [];
-      for (const f of files) {
-        const dataBase64 = await readFileAsBase64(f);
-        photos.push({ name: f.name, type: f.type, dataBase64 });
+      try {
+        const ts = Date.now();
+        const d = new Date(ts);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        const HH = String(d.getHours()).padStart(2,'0');
+        const MM = String(d.getMinutes()).padStart(2,'0');
+        const SS = String(d.getSeconds()).padStart(2,'0');
+        const dayDir = `notes/${yyyy}-${mm}-${dd}`;
+        const stamp = `${HH}${MM}${SS}`;
+
+        const imgPaths = [];
+        for (let i=0;i<files.length;i++) {
+          const f = files[i];
+          const b64 = await readFileAsBase64(f);
+          const ext = (f.name.split('.').pop() || '').toLowerCase() || (f.type==='image/jpeg'?'jpg':f.type==='image/png'?'png':'bin');
+          const path = `${dayDir}/images/${stamp}-${i+1}.${ext}`;
+          imgPaths.push(path);
+          await ghPutFile(path, b64, `Add photo ${yyyy}-${mm}-${dd} ${stamp} #${i+1}`);
+        }
+
+        const md = [
+          `# ${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}` ,
+          '',
+          text || '',
+          '',
+          ...(imgPaths.length ? ['## Photos','', ...imgPaths.map(p=>`![](${p.replace(dayDir+'/','')})`), ''] : [])
+        ].join('\n');
+
+        await ghPutFile(`${dayDir}/${stamp}.md`, await base64Utf8(md), `Add note ${yyyy}-${mm}-${dd} ${stamp}`);
+
+        $('text').value = '';
+        $('photos').value = '';
+        toast('已保存到 GitHub～');
+      } catch (e) {
+        toast('保存失败：' + String(e).slice(0, 120));
       }
-
-      const res = await fetch(API_BASE + '/save', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, photos }),
-      });
-
-      if (!res.ok) {
-        const t = await res.text();
-        toast('保存失败：' + t.slice(0, 80));
-        return;
-      }
-
-      $('text').value = '';
-      $('photos').value = '';
-      toast('已保存到 GitHub～');
     };
 
     $('export').onclick = async () => {
