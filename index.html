@@ -107,6 +107,19 @@
       font-size: 12px;
       color: rgba(0,0,0,0.42);
     }
+    a.entry{
+      display:inline-block;
+      text-decoration:none;
+      color: rgba(11,42,120,0.78);
+      background: rgba(255,255,255,0.75);
+      border: 1px solid rgba(11,42,120,0.10);
+      padding: 10px 14px;
+      border-radius: 999px;
+      box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+      transition: transform 120ms ease, box-shadow 120ms ease;
+    }
+    a.entry:hover{ transform: translateY(-1px); box-shadow: 0 14px 30px rgba(0,0,0,0.10); }
+    a.entry:active{ transform: translateY(0px) scale(0.99); }
 
     /* little “pop” effect when changing text */
     .pop { animation: pop 180ms ease-out; }
@@ -150,6 +163,10 @@
     <span class="sign" id="sign"></span>
 
     <div class="tiny" id="time"></div>
+
+    <div class="tiny" style="margin-top:18px">
+      <a class="entry" href="./theo-notes.html">Theo的碎碎念收纳处</a>
+    </div>
   </main>
 
   <div class="burst" id="burst"></div>
