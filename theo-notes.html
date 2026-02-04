@@ -308,40 +308,31 @@
       return new TextDecoder('utf-8').decode(bytes);
     }
 
+    async function ghTryGetJson(path){
+      try {
+        const f = await ghGetFile(path);
+        const txt = f.encoding === 'base64' ? b64ToUtf8(f.content) : '';
+        return JSON.parse(txt);
+      } catch {
+        return null;
+      }
+    }
+
     async function renderFromGitHub(){
       const list = $('list');
       list.innerHTML = '<div class="meta">正在从 GitHub 读取…</div>';
 
-      let root;
-      try {
-        root = await ghListDir('notes');
-      } catch {
-        list.innerHTML = '<div class="meta">还没有记录～</div>';
-        return;
-      }
-
-      const mdFiles = [];
-      for (const day of root) {
-        if (day.type !== 'dir') continue;
-        const dayName = day.name;
-        try {
-          const dayList = await ghListDir(`notes/${dayName}`);
-          for (const f of dayList) {
-            if (f.type === 'file' && f.name.endsWith('.md')) {
-              mdFiles.push({ day: dayName, path: `notes/${dayName}/${f.name}` });
-            }
-          }
-        } catch {}
-      }
-
-      mdFiles.sort((a,b) => (b.path).localeCompare(a.path));
-      const show = mdFiles.slice(0, 30);
+      // Fast path: use notes/index.json (single file)
+      const index = await ghTryGetJson('notes/index.json');
+      const items = Array.isArray(index?.items) ? index.items : [];
 
       list.innerHTML = '';
-      if (!show.length) {
+      if (!items.length) {
         list.innerHTML = '<div class="meta">还没有记录～</div>';
         return;
       }
+
+      const show = items.slice(0, 30);
 
       for (const it of show) {
         const div = document.createElement('div');
@@ -349,37 +340,52 @@
 
         const meta = document.createElement('div');
         meta.className = 'meta';
-        meta.textContent = it.path;
-
-        const file = await ghGetFile(it.path);
-        const md = file.encoding === 'base64' ? b64ToUtf8(file.content) : '';
+        meta.textContent = `${it.day || ''} · ${new Date(it.ts || Date.now()).toLocaleString('zh-CN')}`;
 
         const text = document.createElement('div');
         text.className = 'text';
-        text.textContent = md.replace(/^#.*\n+/, '').trim();
+        text.textContent = it.text || '';
 
         div.appendChild(meta);
         if (text.textContent) div.appendChild(text);
 
-        const imgMatches = Array.from(md.matchAll(/!\[]\((images\/[^)]+)\)/g)).map(m => m[1]);
-        if (imgMatches.length) {
+        const imgsArr = Array.isArray(it.images) ? it.images : [];
+        if (imgsArr.length) {
+          const btn = document.createElement('button');
+          btn.textContent = `查看照片（${imgsArr.length}）`;
+          btn.style.marginTop = '10px';
+
           const imgs = document.createElement('div');
           imgs.className = 'imgs';
-          for (const rel of imgMatches.slice(0, 6)) {
-            const imgPath = `notes/${it.day}/${rel}`;
-            try {
-              const imgFile = await ghGetFile(imgPath);
-              const b64 = String(imgFile.content || '').replace(/\n/g,'');
-              const bin = atob(b64);
-              const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-              const blob = new Blob([bytes]);
-              const url = URL.createObjectURL(blob);
-              const img = document.createElement('img');
-              img.alt = 'photo';
-              img.src = url;
-              imgs.appendChild(img);
-            } catch {}
-          }
+          imgs.style.display = 'none';
+
+          btn.onclick = async () => {
+            if (imgs.style.display === 'none') {
+              imgs.style.display = 'flex';
+              btn.textContent = '收起照片';
+              if (imgs.childElementCount === 0) {
+                for (const p of imgsArr.slice(0, 9)) {
+                  try {
+                    const imgFile = await ghGetFile(p);
+                    const b64 = String(imgFile.content || '').replace(/\n/g,'');
+                    const bin = atob(b64);
+                    const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+                    const blob = new Blob([bytes]);
+                    const url = URL.createObjectURL(blob);
+                    const img = document.createElement('img');
+                    img.alt = 'photo';
+                    img.src = url;
+                    imgs.appendChild(img);
+                  } catch {}
+                }
+              }
+            } else {
+              imgs.style.display = 'none';
+              btn.textContent = `查看照片（${imgsArr.length}）`;
+            }
+          };
+
+          div.appendChild(btn);
           div.appendChild(imgs);
         }
 
@@ -432,7 +438,8 @@
         const HH = String(d.getHours()).padStart(2,'0');
         const MM = String(d.getMinutes()).padStart(2,'0');
         const SS = String(d.getSeconds()).padStart(2,'0');
-        const dayDir = `notes/${yyyy}-${mm}-${dd}`;
+        const day = `${yyyy}-${mm}-${dd}`;
+        const dayDir = `notes/${day}`;
         const stamp = `${HH}${MM}${SS}`;
 
         const imgPaths = [];
@@ -442,19 +449,26 @@
           const ext = (f.name.split('.').pop() || '').toLowerCase() || (f.type==='image/jpeg'?'jpg':f.type==='image/png'?'png':'bin');
           const path = `${dayDir}/images/${stamp}-${i+1}.${ext}`;
           imgPaths.push(path);
-          await ghPutFile(path, b64, `Add photo ${yyyy}-${mm}-${dd} ${stamp} #${i+1}`);
+          await ghPutFile(path, b64, `Add photo ${day} ${stamp} #${i+1}`);
         }
 
-        const md = [
-          `# ${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}` ,
-          '',
-          text || '',
-          '',
-          ...(imgPaths.length ? ['## Photos','', ...imgPaths.map(p=>`![](${p.replace(dayDir+'/','')})`), ''] : [])
-        ].join('\n');
+        // Append to daily JSON
+        const dailyPath = `${dayDir}/entries.json`;
+        const daily = (await ghTryGetJson(dailyPath)) || { day, items: [] };
+        daily.items = Array.isArray(daily.items) ? daily.items : [];
+        daily.items.unshift({ ts, text, images: imgPaths });
+        await ghPutFile(dailyPath, await base64Utf8(JSON.stringify(daily, null, 2)), `Update daily entries ${day}`);
 
-        await ghPutFile(`${dayDir}/${stamp}.md`, await base64Utf8(md), `Add note ${yyyy}-${mm}-${dd} ${stamp}`);
+        // Update index.json (fast list)
+        const idxPath = 'notes/index.json';
+        const idx = (await ghTryGetJson(idxPath)) || { items: [] };
+        idx.items = Array.isArray(idx.items) ? idx.items : [];
+        idx.items.unshift({ ts, day, text, images: imgPaths });
+        // keep recent 200
+        idx.items = idx.items.slice(0, 200);
+        await ghPutFile(idxPath, await base64Utf8(JSON.stringify(idx, null, 2)), `Update notes index ${day}`);
 
+        // optimistic UI: add to top immediately
         $('text').value = '';
         $('photos').value = '';
         toast('已保存到 GitHub～');
