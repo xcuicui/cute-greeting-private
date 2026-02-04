@@ -83,6 +83,28 @@
 
     .note{margin-top:12px; font-size:12px; color: rgba(0,0,0,0.46); line-height:1.6}
 
+    /* calendar */
+    .calHead{margin-top:10px; display:flex; align-items:center; justify-content:space-between; gap:10px;}
+    .calTitle{font-weight:900; color: rgba(0,0,0,0.78);}
+    .calGrid{margin-top:10px; display:grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap:8px;}
+    .calCell{
+      border-radius: 14px;
+      border: 1px solid rgba(0,0,0,0.06);
+      background: rgba(255,255,255,0.60);
+      padding: 10px 8px;
+      min-height: 44px;
+      cursor:pointer;
+      user-select:none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+      position: relative;
+    }
+    .calCell.dim{opacity:0.45;}
+    .calCell.has{background: linear-gradient(135deg, rgba(11,42,120,0.12), rgba(90,167,255,0.18)); border-color: rgba(31,102,227,0.18);}
+    .calCell.today{outline: 2px solid rgba(31,102,227,0.28);}
+    .calNum{font-weight:900; color: rgba(0,0,0,0.72); font-size:14px;}
+    .calDot{position:absolute; right:10px; bottom:10px; width:7px; height:7px; border-radius:999px; background: rgba(31,102,227,0.65);}
+
     .toast{position:fixed; left:50%; bottom: 16px; transform: translateX(-50%);
       background: rgba(0,0,0,0.80); color:#fff; padding: 10px 14px; border-radius: 999px; font-size: 13px;
       box-shadow: 0 18px 50px rgba(0,0,0,0.20); display:none; max-width: calc(100% - 24px); text-align:center;}
@@ -120,7 +142,18 @@
     </div>
 
     <div class="card">
-      <div class="meta">已保存的记录（从仓库读取）</div>
+      <div class="meta">日历</div>
+      <div class="calHead">
+        <button id="prevM">←</button>
+        <div class="calTitle" id="calTitle"></div>
+        <button id="nextM">→</button>
+      </div>
+      <div class="calGrid" id="calGrid"></div>
+      <div class="note">点日期查看当天碎碎念；有记录的日期会高亮。</div>
+    </div>
+
+    <div class="card">
+      <div class="meta" id="dayTitle">已保存的记录（从仓库读取）</div>
       <div class="list" id="list"></div>
     </div>
   </div>
@@ -318,29 +351,74 @@
       }
     }
 
-    async function renderFromGitHub(){
-      const list = $('list');
-      list.innerHTML = '<div class="meta">正在从 GitHub 读取…</div>';
+    let notesIndex = { items: [] };
+    const dayCache = new Map(); // day -> daily json
 
-      // Fast path: use notes/index.json (single file)
-      const index = await ghTryGetJson('notes/index.json');
-      const items = Array.isArray(index?.items) ? index.items : [];
+    function ymKey(y,m){ return `${y}-${String(m).padStart(2,'0')}`; }
+
+    function renderCalendar(year, month){
+      const calTitle = $('calTitle');
+      const grid = $('calGrid');
+      if (!calTitle || !grid) return;
+
+      calTitle.textContent = `${year} / ${String(month).padStart(2,'0')}`;
+      grid.innerHTML = '';
+
+      const first = new Date(year, month-1, 1);
+      const startDow = (first.getDay() + 6) % 7; // Monday=0
+      const daysInMonth = new Date(year, month, 0).getDate();
+
+      // days set with entries
+      const hasDays = new Set();
+      for (const it of (notesIndex.items || [])) {
+        if (!it.day) continue;
+        if (String(it.day).startsWith(ymKey(year,month))) hasDays.add(it.day);
+      }
+
+      const today = new Date();
+      const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
+
+      // leading blanks
+      for (let i=0;i<startDow;i++) {
+        const d = document.createElement('div');
+        d.className = 'calCell dim';
+        d.style.cursor = 'default';
+        grid.appendChild(d);
+      }
+
+      for (let day=1; day<=daysInMonth; day++) {
+        const dayStr = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        const cell = document.createElement('div');
+        cell.className = 'calCell' + (hasDays.has(dayStr) ? ' has' : '');
+        if (dayStr === todayStr) cell.className += ' today';
+        cell.innerHTML = `<div class="calNum">${day}</div>` + (hasDays.has(dayStr) ? `<div class="calDot"></div>` : '');
+        cell.onclick = () => loadDay(dayStr);
+        grid.appendChild(cell);
+      }
+    }
+
+    async function renderDay(dayStr){
+      const list = $('list');
+      const title = $('dayTitle');
+      if (title) title.textContent = `${dayStr} 的碎碎念`;
+      if (!list) return;
+
+      const daily = dayCache.get(dayStr) || { items: [] };
+      const items = Array.isArray(daily.items) ? daily.items : [];
 
       list.innerHTML = '';
       if (!items.length) {
-        list.innerHTML = '<div class="meta">还没有记录～</div>';
+        list.innerHTML = '<div class="meta">这一天还没有记录～</div>';
         return;
       }
 
-      const show = items.slice(0, 30);
-
-      for (const it of show) {
+      for (const it of items) {
         const div = document.createElement('div');
         div.className = 'item';
 
         const meta = document.createElement('div');
         meta.className = 'meta';
-        meta.textContent = `${it.day || ''} · ${new Date(it.ts || Date.now()).toLocaleString('zh-CN')}`;
+        meta.textContent = new Date(it.ts || Date.now()).toLocaleString('zh-CN');
 
         const text = document.createElement('div');
         text.className = 'text';
@@ -364,7 +442,7 @@
               imgs.style.display = 'flex';
               btn.textContent = '收起照片';
               if (imgs.childElementCount === 0) {
-                for (const p of imgsArr.slice(0, 9)) {
+                for (const p of imgsArr.slice(0, 12)) {
                   try {
                     const imgFile = await ghGetFile(p);
                     const b64 = String(imgFile.content || '').replace(/\n/g,'');
@@ -391,6 +469,53 @@
 
         list.appendChild(div);
       }
+    }
+
+    async function loadDay(dayStr){
+      const list = $('list');
+      if (list) list.innerHTML = '<div class="meta">正在加载当天记录…</div>';
+
+      if (!dayCache.has(dayStr)) {
+        const dailyPath = `notes/${dayStr}/entries.json`;
+        const daily = (await ghTryGetJson(dailyPath)) || { day: dayStr, items: [] };
+        dayCache.set(dayStr, daily);
+      }
+      await renderDay(dayStr);
+    }
+
+    async function renderFromGitHub(){
+      // Fast path: use notes/index.json (single file)
+      const index = await ghTryGetJson('notes/index.json');
+      notesIndex = index && typeof index === 'object' ? index : { items: [] };
+
+      // default month = current
+      const now = new Date();
+      let viewY = now.getFullYear();
+      let viewM = now.getMonth() + 1;
+
+      const prevM = $('prevM');
+      const nextM = $('nextM');
+
+      const rerender = () => {
+        renderCalendar(viewY, viewM);
+      };
+
+      prevM && (prevM.onclick = () => {
+        viewM -= 1;
+        if (viewM <= 0) { viewM = 12; viewY -= 1; }
+        rerender();
+      });
+      nextM && (nextM.onclick = () => {
+        viewM += 1;
+        if (viewM >= 13) { viewM = 1; viewY += 1; }
+        rerender();
+      });
+
+      rerender();
+
+      // auto open today's day
+      const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      await loadDay(today);
     }
 
     async function render(){
