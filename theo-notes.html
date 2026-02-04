@@ -193,7 +193,7 @@
       <div class="thumbs" id="thumbs"></div>
 
       <div class="btns">
-        <button class="primary" id="saveGitHub">把这条收起来</button>
+        <button class="primary" id="saveGitHub">记录</button>
       </div>
 
       <div class="note">
@@ -847,7 +847,7 @@
         toast('保存失败：' + String(e).slice(0, 120));
       } finally {
         btn && (btn.disabled = false);
-        btn && (btn.textContent = oldLabel || '把这条收起来');
+        btn && (btn.textContent = oldLabel || '记录');
       }
     };
 
