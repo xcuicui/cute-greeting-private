@@ -475,6 +475,8 @@
     let notesIndex = { items: [] };
     const dayCache = new Map(); // day -> daily json
     let selectedDay = '';
+    let viewY = 0;
+    let viewM = 0;
 
     function ymKey(y,m){ return `${y}-${String(m).padStart(2,'0')}`; }
     function renderWeek(){
@@ -607,11 +609,7 @@
     async function loadDay(dayStr){
       selectedDay = dayStr;
       // re-highlight selection
-      const title = $('calTitle');
-      if (title) {
-        const m = (title.textContent || '').trim();
-        // no-op; rerender handled outside
-      }
+      if (viewY && viewM) renderCalendar(viewY, viewM);
 
       const list = $('list');
       if (list) list.innerHTML = '<div class="meta">正在加载当天记录…</div>';
@@ -632,8 +630,8 @@
 
       // default month = current
       const now = new Date();
-      let viewY = now.getFullYear();
-      let viewM = now.getMonth() + 1;
+      viewY = now.getFullYear();
+      viewM = now.getMonth() + 1;
 
       const prevM = $('prevM');
       const nextM = $('nextM');
