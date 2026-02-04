@@ -50,7 +50,7 @@
 
     .card {
       width: min(760px, calc(100% - 32px));
-      padding: 0;
+      padding: 28px 24px;
       border-radius: 24px;
       background: rgba(255,255,255,0.74);
       border: 1px solid rgba(11,42,120,0.10);
@@ -59,6 +59,9 @@
       text-align: center;
       position: relative;
       overflow: hidden;
+      will-change: transform, opacity;
+      transition: transform 180ms ease, opacity 180ms ease;
+      transform: translateX(0);
     }
     .card::before {
       content: "";
@@ -70,14 +73,7 @@
       animation: glow 10s ease-in-out infinite;
       pointer-events: none;
     }
-    .swipeInner{
-      position: relative;
-      padding: 28px 24px;
-      will-change: transform, opacity;
-      transition: transform 180ms ease, opacity 180ms ease;
-      touch-action: pan-y;
-    }
-    .swipeInner.dragging{ transition: none; }
+    .card.dragging{ transition: none; }
     @keyframes glow {
       0%,100% { transform: rotate(0deg) scale(1.0); }
       50% { transform: rotate(10deg) scale(1.06); }
@@ -142,18 +138,16 @@
   </style>
 </head>
 <body>
-  <main class="card" id="swipeCard">
-    <div class="swipeInner" id="swipeInner" aria-label="swipe">
-      <h1 id="title">给你的小问候</h1>
-      <p class="msg" id="greet"></p>
-      <span class="sign" id="sign"></span>
+  <main class="card" id="swipeCard" aria-label="swipe">
+    <h1 id="title">给你的小问候</h1>
+    <p class="msg" id="greet"></p>
+    <span class="sign" id="sign"></span>
 
-      <div class="tiny">左右滑动切换 · 轻点任意位置会爆出蓝色小心心</div>
-      <div class="tiny" id="time"></div>
-    </div>
-
-    <div class="burst" id="burst"></div>
+    <div class="tiny">左右滑动切换 · 轻点任意位置会爆出蓝色小心心</div>
+    <div class="tiny" id="time"></div>
   </main>
+
+  <div class="burst" id="burst"></div>
 
   <script src="./data.obf.js"></script>
   <script>
@@ -203,7 +197,7 @@
     function prev() { current = showAt(idx - 1); }
 
     const root = document.body;
-    const swipeInner = document.getElementById('swipeInner');
+    const card = document.getElementById('swipeCard');
 
     // Drag-to-swipe (card follows finger, release to switch)
     let down = false;
@@ -215,36 +209,39 @@
     const SWIPE_MIN = 55;
 
     function setTranslate(x, opacity = 1) {
-      if (!swipeInner) return;
-      swipeInner.style.transform = `translateX(${x}px)`;
-      swipeInner.style.opacity = String(opacity);
+      if (!card) return;
+      card.style.transform = `translateX(${x}px)`;
+      card.style.opacity = String(opacity);
     }
 
-    function animateSwitch(dir /* -1 left, +1 right */) {
-      if (!swipeInner) return;
-      const w = swipeInner.getBoundingClientRect().width;
-      const off = Math.min(260, w * 0.38);
-      swipeInner.classList.remove('dragging');
+    function animateSwitch(sign /* -1 left, +1 right */) {
+      if (!card) return;
+      const w = card.getBoundingClientRect().width;
+      const off = Math.min(280, w * 0.42);
+      card.classList.remove('dragging');
 
-      // slide out
-      setTranslate(dir * -off, 0);
+      // slide out in the SAME direction as the swipe
+      setTranslate(sign * off, 0);
+
       setTimeout(() => {
         // jump to opposite side without transition
-        swipeInner.classList.add('dragging');
-        setTranslate(dir * off, 0);
+        card.classList.add('dragging');
+        setTranslate(-sign * off, 0);
+
         // update content
-        dir === -1 ? next() : prev();
+        sign === -1 ? next() : prev();
+
         // slide in
         requestAnimationFrame(() => {
-          swipeInner.classList.remove('dragging');
+          card.classList.remove('dragging');
           setTranslate(0, 1);
         });
       }, 170);
     }
 
     function resetPosition() {
-      if (!swipeInner) return;
-      swipeInner.classList.remove('dragging');
+      if (!card) return;
+      card.classList.remove('dragging');
       setTranslate(0, 1);
     }
 
@@ -254,7 +251,7 @@
       startY = e.clientY;
       dx = 0;
       moved = 0;
-      swipeInner?.classList.add('dragging');
+      card?.classList.add('dragging');
     });
 
     root.addEventListener('pointermove', (e) => {
@@ -265,9 +262,8 @@
 
       // Only treat as swipe when horizontal intention
       if (Math.abs(dx) > Math.abs(dy)) {
-        // prevent page from scrolling / moving background
         e.preventDefault?.();
-        const damp = Math.max(-320, Math.min(320, dx));
+        const damp = Math.max(-340, Math.min(340, dx));
         setTranslate(damp, 1);
       }
     }, { passive: false });
