@@ -202,7 +202,7 @@
       const list = $('list');
       list.innerHTML = '<div class="meta">正在从 GitHub 读取…</div>';
 
-      const res = await fetch(API_BASE + '/list?limit=30');
+      const res = await authedFetch('/list?limit=30');
       if (!res.ok) throw new Error(await res.text());
       const j = await res.json();
       const items = j.items || [];
@@ -234,7 +234,7 @@
           for (const rel of it.images.slice(0, 6)) {
             const img = document.createElement('img');
             img.alt = 'photo';
-            img.src = API_BASE + '/file?path=' + encodeURIComponent(`notes/${it.day}/${rel}`);
+            img.src = API_BASE + '/file?path=' + encodeURIComponent(`notes/${it.day}/${rel}`) + '&k=' + encodeURIComponent(getKey());
             imgs.appendChild(img);
           }
           div.appendChild(imgs);
@@ -300,6 +300,74 @@
 
     // Cloudflare Worker endpoint (admin configured once)
     const API_BASE = 'https://theo-notes-worker.1906067657.workers.dev';
+    const KEY_STORAGE = 'theo_notes_write_key';
+
+    function getKey(){
+      try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; }
+    }
+    function setKey(v){
+      try { localStorage.setItem(KEY_STORAGE, v); } catch {}
+    }
+    function clearKey(){
+      try { localStorage.removeItem(KEY_STORAGE); } catch {}
+    }
+
+    // gate UI
+    const gate = document.createElement('div');
+    gate.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;padding:18px;background:rgba(255,255,255,0.55);backdrop-filter:blur(12px);z-index:99;';
+    gate.innerHTML = `
+      <div style="width:min(520px,100%);border-radius:22px;background:rgba(255,255,255,0.86);border:1px solid rgba(0,0,0,0.06);box-shadow:0 24px 70px rgba(0,0,0,0.12);padding:18px 16px;">
+        <div style="font-size:18px;font-weight:900;color:rgba(0,0,0,0.84)">请输入口令</div>
+        <div style="margin-top:8px;font-size:13px;color:rgba(0,0,0,0.55);line-height:1.6">这是一个小小的朋友专属入口～</div>
+        <input id="keyInput" type="password" placeholder="口令" style="margin-top:12px;width:100%;border-radius:14px;border:1px solid rgba(0,0,0,0.12);padding:10px 12px;font-size:14px;outline:none;background:rgba(255,255,255,0.92);" />
+        <div id="keyErr" style="margin-top:10px;font-size:13px;color:#b0003a;display:none">口令不对哦～</div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+          <button id="keyOk" class="primary" style="border:0;border-radius:999px;padding:10px 14px;font-size:14px;cursor:pointer;background:linear-gradient(135deg,#0b2a78,#5aa7ff);color:#fff;font-weight:800;">进入</button>
+        </div>
+      </div>
+    `;
+
+    async function authedFetch(path, init = {}){
+      const key = getKey();
+      const headers = { ...(init.headers || {}), 'x-write-key': key };
+      return fetch(API_BASE + path, { ...init, headers });
+    }
+
+    async function checkKey(){
+      const res = await authedFetch('/list?limit=1', { method: 'GET' });
+      return res.ok;
+    }
+
+    async function ensureKey(){
+      const existing = getKey();
+      if (existing) {
+        const ok = await checkKey().catch(()=>false);
+        if (ok) return;
+        clearKey();
+      }
+      document.body.appendChild(gate);
+      const input = gate.querySelector('#keyInput');
+      const err = gate.querySelector('#keyErr');
+      const btn = gate.querySelector('#keyOk');
+      const submit = async () => {
+        err.style.display = 'none';
+        const v = String(input.value || '').trim();
+        if (!v) return;
+        setKey(v);
+        const ok = await checkKey().catch(()=>false);
+        if (ok) {
+          gate.remove();
+          render();
+        } else {
+          clearKey();
+          err.style.display = 'block';
+        }
+      };
+      btn.onclick = submit;
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+      input.focus();
+    }
+
     async function base64Utf8(str){
       const bytes = new TextEncoder().encode(str);
       let bin = '';
@@ -372,7 +440,7 @@
       }
 
       try {
-        const res = await fetch(API_BASE + '/save', {
+        const res = await authedFetch('/save', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ text, photos }),
