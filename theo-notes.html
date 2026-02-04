@@ -568,10 +568,19 @@
         cell.className = 'calCell' + (hasDays.has(dayStr) ? ' has' : '');
         if (dayStr === todayStr) cell.className += ' today';
         if (dayStr === selectedDay) cell.className += ' sel';
+        cell.dataset.day = dayStr;
         cell.innerHTML = `<div class="calNum">${day}</div>` + (hasDays.has(dayStr) ? `<div class="calDot"></div>` : '');
         cell.onclick = () => loadDay(dayStr);
         grid.appendChild(cell);
       }
+    }
+
+    function markSelected(dayStr){
+      const grid = $('calGrid');
+      if (!grid) return;
+      grid.querySelectorAll('.calCell.sel').forEach(el => el.classList.remove('sel'));
+      const hit = grid.querySelector(`.calCell[data-day="${dayStr}"]`);
+      if (hit) hit.classList.add('sel');
     }
 
     async function renderDay(dayStr){
@@ -651,8 +660,10 @@
 
     async function loadDay(dayStr){
       selectedDay = dayStr;
-      // re-highlight selection
+      // re-highlight selection (fast DOM toggle; fallback rerender if needed)
+      markSelected(dayStr);
       if (viewY && viewM) renderCalendar(viewY, viewM);
+      markSelected(dayStr);
 
       const list = $('list');
       if (list) list.innerHTML = '<div class="meta">正在加载当天记录…</div>';
