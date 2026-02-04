@@ -209,7 +209,136 @@
       });
     }
 
+    // --- GitHub read helpers (for showing content from repo) ---
+    async function ghFetch(path, opts = {}){
+      if (!GH_TOKEN) throw new Error('missing_token');
+      const url = `https://api.github.com${path}`;
+      const res = await fetch(url, {
+        ...opts,
+        headers: {
+          'authorization': `Bearer ${GH_TOKEN}`,
+          'accept': 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          ...(opts.headers || {}),
+        }
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`${res.status} ${t.slice(0, 200)}`);
+      }
+      return res.json();
+    }
+
+    function b64ToUtf8(b64){
+      const bin = atob(b64);
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      return new TextDecoder('utf-8').decode(bytes);
+    }
+
+    async function ghListDir(repoPath){
+      // repoPath without leading slash, e.g. "notes" or "notes/2026-02-04"
+      const enc = repoPath.split('/').map(encodeURIComponent).join('/');
+      return ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
+    }
+
+    async function ghGetFile(repoPath){
+      const enc = repoPath.split('/').map(encodeURIComponent).join('/');
+      const j = await ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
+      if (!j || j.type !== 'file') throw new Error('not_file');
+      return { content: j.content, encoding: j.encoding, download_url: j.download_url };
+    }
+
+    async function renderFromGitHub(){
+      const list = $('list');
+      list.innerHTML = '<div class="meta">正在从 GitHub 读取…</div>';
+
+      let root;
+      try {
+        root = await ghListDir('notes');
+      } catch (e) {
+        list.innerHTML = '<div class="meta">GitHub 仓库里还没有 notes/ 目录～</div>';
+        return;
+      }
+
+      // collect md files (depth: notes/YYYY-MM-DD/*.md)
+      const mdFiles = [];
+      for (const day of root) {
+        if (day.type !== 'dir') continue;
+        const dayName = day.name;
+        try {
+          const dayList = await ghListDir(`notes/${dayName}`);
+          for (const f of dayList) {
+            if (f.type === 'file' && f.name.endsWith('.md')) {
+              mdFiles.push({ day: dayName, name: f.name, path: `notes/${dayName}/${f.name}` });
+            }
+          }
+        } catch {}
+      }
+
+      mdFiles.sort((a,b) => (b.path).localeCompare(a.path));
+      const show = mdFiles.slice(0, 30);
+
+      list.innerHTML = '';
+      if (!show.length) {
+        list.innerHTML = '<div class="meta">还没有记录～</div>';
+        return;
+      }
+
+      for (const it of show) {
+        const div = document.createElement('div');
+        div.className = 'item';
+
+        const meta = document.createElement('div');
+        meta.className = 'meta';
+        meta.textContent = it.path;
+
+        const file = await ghGetFile(it.path);
+        const md = file.encoding === 'base64' ? b64ToUtf8(String(file.content || '').replace(/\n/g,'')) : '';
+
+        const text = document.createElement('div');
+        text.className = 'text';
+        // naive render: strip leading title, keep remaining text. (We can improve later.)
+        text.textContent = md.replace(/^#.*\n+/, '').trim();
+
+        div.appendChild(meta);
+        if (text.textContent) div.appendChild(text);
+
+        // show images if present (parse ![](images/...))
+        const imgMatches = Array.from(md.matchAll(/!\[]\((images\/[^)]+)\)/g)).map(m => m[1]);
+        if (imgMatches.length) {
+          const imgs = document.createElement('div');
+          imgs.className = 'imgs';
+          for (const rel of imgMatches.slice(0, 6)) {
+            const imgPath = `notes/${it.day}/${rel}`;
+            try {
+              const imgFile = await ghGetFile(imgPath);
+              const b64 = String(imgFile.content || '').replace(/\n/g,'');
+              const bin = atob(b64);
+              const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+              const blob = new Blob([bytes]);
+              const url = URL.createObjectURL(blob);
+              const img = document.createElement('img');
+              img.alt = 'photo';
+              img.src = url;
+              imgs.appendChild(img);
+            } catch {}
+          }
+          div.appendChild(imgs);
+        }
+
+        list.appendChild(div);
+      }
+    }
+
     async function render(){
+      // Prefer GitHub view if token exists
+      if (GH_TOKEN) {
+        try { await renderFromGitHub(); return; } catch (e) {
+          console.warn('renderFromGitHub failed', e);
+          // fall back to local
+        }
+      }
+
       const list = $('list');
       const items = (await getAll()).sort((a,b) => b.ts - a.ts);
       list.innerHTML = '';
@@ -240,7 +369,6 @@
           for (const p of it.photos) {
             const img = document.createElement('img');
             img.alt = 'photo';
-            // render blob as data url (small projects). can optimize later.
             img.src = await toDataURL(p);
             imgs.appendChild(img);
           }
@@ -379,6 +507,7 @@
           $('text').value = '';
           $('photos').value = '';
           toast('已保存到 GitHub～');
+          render();
           return;
         } catch (e) {
           // fall through to direct token mode
@@ -427,6 +556,7 @@
         $('text').value = '';
         $('photos').value = '';
         toast('已保存到 GitHub～');
+        render();
       } catch (e) {
         toast('保存失败：' + String(e).slice(0, 120));
       }
