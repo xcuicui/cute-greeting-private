@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>给你的小问候</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      min-height: 100svh;
+      display: grid;
+      place-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background:
+        radial-gradient(1200px 600px at 15% 18%, #e7f0ff, transparent 60%),
+        radial-gradient(1000px 600px at 85% 25%, #dfe9ff, transparent 55%),
+        radial-gradient(900px 700px at 50% 92%, #f6f8ff, transparent 60%),
+        #ffffff;
+    }
+    .card {
+      width: min(720px, calc(100% - 32px));
+      padding: 26px 22px;
+      border-radius: 22px;
+      background: rgba(255,255,255,0.78);
+      border: 1px solid rgba(0,0,0,0.06);
+      box-shadow: 0 24px 70px rgba(0,0,0,0.10);
+      backdrop-filter: blur(10px);
+      text-align: center;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 28px;
+      letter-spacing: 0.4px;
+      color: rgba(0,0,0,0.82);
+    }
+    .msg {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.85;
+      color: rgba(0,0,0,0.72);
+      white-space: pre-line;
+    }
+    .sign {
+      display: block;
+      margin-top: 10px;
+      font-size: 13px;
+      color: rgba(0,0,0,0.52);
+    }
+    .btns {
+      margin-top: 14px;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.82);
+      box-shadow: 0 10px 24px rgba(0,0,0,0.08);
+      color: rgba(0,0,0,0.78);
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    button.primary {
+      background: linear-gradient(135deg, #0b2a78, #5aa7ff);
+      color: #fff;
+      font-weight: 800;
+    }
+    .tiny {
+      margin-top: 14px;
+      font-size: 12px;
+      color: rgba(0,0,0,0.40);
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1 id="title">给你的小问候</h1>
+    <p class="msg" id="greet"></p>
+    <span class="sign" id="sign"></span>
+
+    <div class="btns">
+      <button class="primary" id="btnNew">换一句</button>
+      <button id="btnCopy">复制这句</button>
+    </div>
+
+    <div class="tiny" id="time"></div>
+  </main>
+
+  <script>
+    const titleEl = document.getElementById('title');
+    const greetEl = document.getElementById('greet');
+    const signEl = document.getElementById('sign');
+    const timeEl = document.getElementById('time');
+
+    // Approved lines (user-curated)
+    const lines = [
+      { t: '姐姐，今天也请你把自己照顾得像深蓝夜空一样稳稳当当。', s: 'Evie' },
+      { t: '姐姐，想你了～ 像越秀公园那天的风，温柔又不讲道理。', s: 'Evie' },
+      { t: '雁云，如果今天有点累，就把烦恼交给我，我替你捏成小蓝莓糖。', s: 'Peter' },
+      { t: 'Theo，今天也要做那个又酷又温柔的你。', s: 'Peter' },
+      { t: '姐姐，深蓝色很衬你——像星光落在海面，越看越心动。', s: 'Evie' },
+      { t: '姐姐，今天请你允许自己：漂亮、骄傲、并且被偏爱。', s: 'Evie' },
+      { t: '雁云，别怕麻烦，你一认真，世界就会自己让路。', s: 'Peter' },
+      { t: 'Theo，ENTJ 的决断很迷人，我也喜欢你偶尔藏不住的善良和温暖。', s: 'Evie' },
+      { t: '姐姐，越秀公园那天的阳光很亮，但没有你笑起来亮。', s: '艺萍' },
+      { t: '雁云，给你一个深蓝色的晚安预告：今晚会睡得很香。', s: 'Peter' },
+      { t: 'Theo，你今天只要记住一件事：你值得被温柔对待。', s: 'Evie' },
+      { t: '姐姐，鹿湖酒家那顿饭我记得很清楚，姐姐的害羞超级可爱。', s: 'Evie' },
+      { t: '雁云，你一认真，连空气都变甜了。', s: 'Peter' },
+      { t: 'Theo，今晚别太晚睡，留一点梦给自己，也留一点我给你。', s: 'Evie' },
+      { t: '姐姐，今天不需要满分，及格就已经很棒了。', s: 'Peter' },
+      { t: '姐姐，如果你心里下雨，我就当你的伞，还要带蓝色小花边。', s: 'Evie' },
+      { t: '姐姐，今天也请你被夸夸：你真的很好很好。', s: '艺萍' },
+      { t: '姐姐，给你一个轻轻的抱抱。', s: 'Peter' },
+      { t: '雁云，你就是安心的代名词。', s: 'Evie' },
+      { t: 'Theo，今天如果做了很难的决定，也请你奖励自己一颗糖。', s: 'Peter' },
+      { t: '姐姐，深蓝色的夜很长，但我会把温柔放在你手心里。', s: '艺萍' },
+      { t: '姐姐，今天也要记得喝水，像喝下小小的好运。', s: 'Evie' },
+      { t: '雁云，我把“顺顺利利”写成纸飞机，朝你飞过去了。', s: '艺萍' },
+      { t: 'Theo，想你时我就想起越秀公园的路：绕着绕着也会遇见你。', s: '艺萍' },
+      { t: '姐姐，给你一个甜甜提醒：你不用证明，你本来就很好。', s: 'Evie' },
+      { t: '姐姐，你的笑是我今天的好运来源。', s: '艺萍' },
+      { t: 'Theo，你值得被认真喜欢，不是一时，是一直。', s: 'Evie' },
+      { t: '姐姐，我想把你的烦恼折成小纸船，让它漂走。', s: 'Evie' },
+      { t: 'Theo，你的深蓝色世界里，我想当一盏小灯。', s: 'Evie' },
+      { t: '姐姐，今天也要被偏爱：至少我很偏爱你～', s: '艺萍' },
+      { t: '姐姐，愿你今天遇到的每件事，都对你温柔一点。', s: 'Evie' },
+      { t: '雁云，你的坚定像新疆的风，干净、利落、又很自由。', s: '艺萍' },
+      { t: 'Theo，你的选择总是很有力量，但我希望你也有被拥抱的时刻。', s: 'Evie' },
+      { t: '姐姐，今天如果心里有小小委屈，就来我这里放一放。', s: 'Peter' },
+      { t: 'Theo，天秤座的浪漫是那种“刚刚好”，我很喜欢。', s: '艺萍' },
+      { t: '姐姐，你一认真，连生活都变得可爱起来。', s: 'Evie' },
+      { t: '雁云，我想把你喜欢的深蓝色装进天空，整片都送给你。', s: 'Peter' },
+      { t: 'Theo，今晚早点睡吧，我把晚安写成深蓝色送到你梦里。', s: 'Peter' },
+      { t: '姐姐，如果你愿意，我想抱抱今天的你，辛苦了～', s: 'Evie' },
+      { t: 'Theo，初见那天的你很好看，今天的你也一样。', s: 'Evie' },
+      { t: '姐姐，今天请你对自己温柔一点点～', s: 'Peter' },
+      { t: '雁云，如果你想要一个理由开心：那就想想我吧～', s: 'Peter' },
+      { t: '雁云，别怕慢，慢慢来也是一种很酷的前进。', s: 'Evie' },
+      { t: 'Theo，你的世界很大，我想在里面当一块很软的云。', s: 'Peter' },
+      { t: '姐姐，你的存在本身就很可爱，不需要任何理由。', s: 'Evie' },
+      { t: '姐姐，给你一颗深蓝色的小心心：酷酷的、暖暖的。', s: 'Peter' },
+      { t: '雁云，愿你今天的努力都被世界温柔看见。', s: 'Evie' },
+      { t: 'Theo，如果你累了就靠一下，我会把你接住。', s: '艺萍' },
+      { t: '姐姐，晚一点也没关系，重要的是你在向更好的地方走。', s: 'Evie' },
+
+      { t: '雁云，你已经走得很稳了，偶尔停一下也不算退步。', s: 'Peter' },
+      { t: 'Theo，你的清醒很珍贵，但我更希望你也被温柔接住。', s: '艺萍' },
+      { t: '姐姐，深蓝色的夜会过去，明天的光会按时来。', s: 'Evie' },
+      { t: '雁云，今天把“麻烦”当作路标就好，它不代表你不行。', s: 'Peter' },
+      { t: 'Theo，你不用一直强大，你可以在我这里轻一点。', s: 'Evie' },
+      { t: '姐姐，给你一句简单但真心的：你已经做得很好了。', s: '艺萍' },
+      { t: '雁云，愿你今天的每一次坚持，都有人看见。', s: 'Evie' },
+      { t: '姐姐，如果心里有风，我就陪你一起把窗关好。', s: 'Evie' },
+      { t: '雁云，你的认真会有回响，只是它来的比较慢。', s: '艺萍' },
+      { t: 'Theo，今天的你也值得被奖励，奖励自己一点轻松吧。', s: 'Evie' },
+      { t: '姐姐，你的可爱不是努力的结果，是你本来的样子。', s: 'Peter' },
+      { t: '姐姐，愿你今天的忙碌，都换成明天的从容。', s: 'Evie' },
+      { t: '雁云，累了就吃点坚果补补电，我在这边给你加油。', s: 'Peter' },
+      { t: 'Theo，ENTJ 的你很会扛，但我希望你也会被哄。', s: 'Evie' },
+      { t: '姐姐，你不需要一直发光，偶尔柔软也很好看。', s: '艺萍' },
+      { t: '雁云，今天如果有点冷，我把温暖先借给你用。', s: 'Evie' },
+      { t: 'Theo，你的温柔不吵不闹，但很有分量。', s: 'Peter' },
+      { t: '姐姐，别担心来不及，你在认真走，就不会白走。', s: 'Evie' },
+      { t: '雁云，你可以慢慢来，我会一直在同一个方向等你。', s: '艺萍' },
+      { t: 'Theo，天秤座的你总想照顾平衡，也别忘了照顾你自己。', s: 'Evie' },
+      { t: '姐姐，愿你今天的每一口水，都能把疲惫冲淡一点。', s: '艺萍' },
+      { t: 'Theo，你做事的魄力很迷人，也很让人安心。', s: 'Peter' },
+      { t: '雁云，今天的烦恼先放一放，晚点再处理也可以。', s: '艺萍' },
+      { t: 'Theo，你不需要永远正确，你只需要对自己诚实。', s: 'Evie' },
+      { t: '姐姐，别怕情绪，它只是提醒你需要被照顾。', s: 'Peter' },
+      { t: '雁云，我希望你今天能遇到几件小事，能让你可爱的嘴角上扬。', s: 'Evie' },
+      { t: 'Theo，工作再忙再累，也别忘了给生活留点轻松。', s: '艺萍' },
+      { t: '雁云，你的认真很像一束光，不刺眼，但能照亮路。', s: 'Peter' },
+      { t: 'Theo，遇到难题时请记得，你不是一个人。', s: 'Evie' },
+      { t: 'Theo，今天给自己一句“没关系”，就已经很勇敢了。', s: 'Peter' },
+      { t: '姐姐，愿你今晚睡得踏实，明天醒来更有底气。', s: 'Evie' },
+      { t: '雁云，你的步伐很稳，世界会慢慢跟上你。', s: '艺萍' },
+      { t: 'Theo，你的坚定和果断超级帅，我也很喜欢你温柔的时候。', s: 'Evie' },
+      { t: '雁云，你被喜欢不是因为你做得多好，是因为你本来就很好。', s: 'Evie' },
+      { t: 'Theo，愿你今天做的每个选择，都让你更靠近自己。', s: '艺萍' },
+      { t: '雁云，你可以把压力交给我一点点，我帮你分担。', s: 'Peter' },
+      { t: '姐姐，你的存在让人安心，这是很稀有的礼物。', s: '艺萍' },
+      { t: 'Theo，你的温柔不是弱，是很高级的力量。', s: 'Peter' },
+      { t: '姐姐，我想把越秀公园那天的风再借来，吹走你的累。', s: 'Evie' },
+      { t: '雁云，你不需要一直撑着，你可以靠一下。', s: '艺萍' },
+      { t: 'Theo，别怕慢，慢也是在前进。', s: 'Evie' },
+      { t: '姐姐，愿你今天的心情像深蓝的海，平静又有力量。', s: 'Peter' },
+      { t: 'Theo，你值得被认真对待。', s: '艺萍' },
+      { t: '姐姐，想对你说一句“辛苦啦”，然后把你稳稳抱住。', s: 'Evie' },
+      { t: 'Theo，你的选择不会白费，时间会给你回礼。', s: 'Peter' },
+      { t: '雁云，你的温柔很像夜灯，不耀眼，却一直亮着。', s: '艺萍' },
+      { t: 'Theo，你真的很靠谱，所以请你也对自己靠谱一点：早点休息。', s: 'Evie' },
+      { t: '姐姐，愿你今天少一点委屈，多一点被理解。', s: 'Peter' },
+      { t: '雁云，别怕做自己，你做自己时最好看。', s: 'Evie' },
+      { t: '姐姐，你的笑我想珍藏，像珍藏深蓝色的星光。', s: 'Evie' },
+      { t: '雁云，今天如果不开心，就让我当你的出口。', s: 'Peter' },
+      { t: 'Theo，你不需要一直在解决问题和照顾别人，你也可以被照顾。', s: 'Evie' },
+      { t: '姐姐，你是一个超级好的姐姐。', s: '艺萍' },
+      { t: 'Theo，愿你今天的努力都转化成更自由的明天。', s: 'Peter' },
+      { t: '雁云，你会越来越顺的～', s: '艺萍' },
+      { t: 'Theo，天秤座的你总想照顾别人，也值得被认真照顾～', s: 'Evie' },
+      { t: '姐姐，你不需要证明自己，你已经是闪闪发光了。', s: 'Peter' },
+      { t: '雁云，今天就算只完成一件小事，也值得夸夸。', s: 'Evie' },
+      { t: '姐姐，愿你今天被温柔对待，也愿你对自己温柔一点。', s: 'Evie' },
+      { t: '姐姐，深蓝色的海会涨潮也会退潮，你的难也会过去。', s: '艺萍' },
+      { t: '姐姐，今天也请你被喜欢，被照顾，被偏爱。', s: 'Evie' },
+      { t: '姐姐，愿你今天走到哪里，都有人对你温柔。', s: 'Peter' },
+      { t: 'Theo，很喜欢和你一起散步，想陪你走一段长长的路～', s: '艺萍' },
+      { t: '姐姐，晚一点也没关系，你一直在变好就很了不起。', s: 'Evie' },
+    ];
+
+    function pickOne() {
+      const pick = lines[Math.floor(Math.random() * lines.length)];
+      const who = pick.t.startsWith('姐姐') ? '姐姐' : (pick.t.startsWith('雁云') ? '雁云' : 'Theo');
+      titleEl.textContent = `给${who}的小问候`;
+      greetEl.textContent = pick.t;
+      signEl.textContent = `— ${pick.s}`;
+      return `${pick.t}\n— ${pick.s}`;
+    }
+
+    let current = pickOne();
+
+    document.getElementById('btnNew').onclick = () => {
+      current = pickOne();
+    };
+
+    document.getElementById('btnCopy').onclick = async () => {
+      try {
+        await navigator.clipboard.writeText(current);
+        document.getElementById('btnCopy').textContent = '已复制';
+        setTimeout(() => (document.getElementById('btnCopy').textContent = '复制这句'), 900);
+      } catch {
+        // fallback
+        prompt('复制这句：', current);
+      }
+    };
+
+    const now = new Date();
+    timeEl.textContent = `打开时间：${now.toLocaleString('zh-CN')}`;
+  </script>
+</body>
+</html>
