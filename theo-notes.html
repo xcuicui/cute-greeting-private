@@ -179,7 +179,7 @@
     <div class="top">
       <div>
         <h1>Theo的碎碎念收纳处</h1>
-        <p class="sub">记录心情、状态、生活点滴。</p>
+        <p class="sub">把今天的小情绪、小快乐、小碎碎念…都悄悄收进来。</p>
       </div>
       <a class="btn" href="./">返回问候页</a>
     </div>
@@ -193,12 +193,11 @@
       <div class="thumbs" id="thumbs"></div>
 
       <div class="btns">
-        <button class="primary" id="saveGitHub">保存到 GitHub</button>
-        <button class="pill" id="clearKey" type="button">更换口令</button>
+        <button class="primary" id="saveGitHub">把这条收起来</button>
       </div>
 
       <div class="note">
-        说明：内容会保存到 GitHub 私有仓库（由管理员配置）。页面里不放明文 token。
+        小提示：照片可以多张，点缩略图能放大看。
       </div>
     </div>
 
@@ -496,7 +495,17 @@
       const enc = repoPath.split('/').map(encodeURIComponent).join('/');
       const j = await ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
       if (!j || j.type !== 'file') throw new Error('not_file');
-      return { content: j.content, encoding: j.encoding };
+      return { content: j.content, encoding: j.encoding, path: j.path, name: j.name };
+    }
+
+    function mimeFromPath(p){
+      const s = String(p || '').toLowerCase();
+      if (s.endsWith('.jpg') || s.endsWith('.jpeg')) return 'image/jpeg';
+      if (s.endsWith('.png')) return 'image/png';
+      if (s.endsWith('.gif')) return 'image/gif';
+      if (s.endsWith('.webp')) return 'image/webp';
+      if (s.endsWith('.heic')) return 'image/heic';
+      return 'application/octet-stream';
     }
 
     function b64ToUtf8(b64){
@@ -634,7 +643,7 @@
                     const b64 = String(imgFile.content || '').replace(/\n/g,'');
                     const bin = atob(b64);
                     const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-                    const blob = new Blob([bytes]);
+                    const blob = new Blob([bytes], { type: mimeFromPath(p) });
                     const url = URL.createObjectURL(blob);
                     const img = document.createElement('img');
                     img.alt = 'photo';
@@ -838,15 +847,9 @@
         toast('保存失败：' + String(e).slice(0, 120));
       } finally {
         btn && (btn.disabled = false);
-        btn && (btn.textContent = oldLabel || '保存到 GitHub');
+        btn && (btn.textContent = oldLabel || '把这条收起来');
       }
     };
-
-    $('clearKey') && ($('clearKey').onclick = () => {
-      clearPass();
-      toast('已清除口令，下次会重新问～');
-      location.reload();
-    });
 
     ensurePassAndToken();
   </script>
