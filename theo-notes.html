@@ -449,6 +449,49 @@
       return ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
     }
 
+    async function loadLegacyMdDay(dayStr){
+      // Legacy fallback: notes/YYYY-MM-DD/*.md (+ images referenced as images/..)
+      const dayDir = `notes/${dayStr}`;
+      let dayList;
+      try {
+        dayList = await ghListDir(dayDir);
+      } catch {
+        return { day: dayStr, items: [] };
+      }
+
+      const mdFiles = (Array.isArray(dayList) ? dayList : [])
+        .filter(x => x && x.type === 'file' && typeof x.name === 'string' && x.name.endsWith('.md'))
+        .map(x => x.name)
+        .sort((a,b) => b.localeCompare(a));
+
+      const items = [];
+      for (const name of mdFiles.slice(0, 60)) {
+        try {
+          const file = await ghGetFile(`${dayDir}/${name}`);
+          const md = file.encoding === 'base64' ? b64ToUtf8(file.content) : '';
+
+          // text: strip first heading line
+          const body = md.replace(/^#.*\n+/, '').trim();
+
+          // images: legacy relative images/... inside the same dayDir
+          const rels = Array.from(md.matchAll(/!\[]\((images\/[^)]+)\)/g)).map(m => m[1]);
+          const images = rels.map(r => `${dayDir}/${r}`);
+
+          // ts: try parse from heading
+          let ts = Date.now();
+          const m = md.match(/^#\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}):(\d{2}):(\d{2})/m);
+          if (m) {
+            const dt = new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}+08:00`);
+            if (!Number.isNaN(dt.getTime())) ts = dt.getTime();
+          }
+          items.push({ ts, text: body, images });
+        } catch {}
+      }
+
+      items.sort((a,b) => (b.ts||0) - (a.ts||0));
+      return { day: dayStr, items };
+    }
+
     async function ghGetFile(repoPath){
       const enc = repoPath.split('/').map(encodeURIComponent).join('/');
       const j = await ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
@@ -616,7 +659,12 @@
 
       if (!dayCache.has(dayStr)) {
         const dailyPath = `notes/${dayStr}/entries.json`;
-        const daily = (await ghTryGetJson(dailyPath)) || { day: dayStr, items: [] };
+        let daily = await ghTryGetJson(dailyPath);
+        if (!daily) {
+          // fallback to legacy markdown day
+          daily = await loadLegacyMdDay(dayStr);
+        }
+        if (!daily || typeof daily !== 'object') daily = { day: dayStr, items: [] };
         dayCache.set(dayStr, daily);
       }
       await renderDay(dayStr);
