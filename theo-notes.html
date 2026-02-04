@@ -530,6 +530,29 @@
     let viewY = 0;
     let viewM = 0;
 
+    // index cache (speed up calendar load)
+    const INDEX_CACHE_KEY = 'theo_notes_index_cache_v1';
+    const INDEX_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+    function loadIndexCache(){
+      try {
+        const raw = localStorage.getItem(INDEX_CACHE_KEY);
+        if (!raw) return null;
+        const j = JSON.parse(raw);
+        if (!j || typeof j !== 'object') return null;
+        if (!j.ts || !j.data) return null;
+        if ((Date.now() - j.ts) > INDEX_CACHE_TTL_MS) return null;
+        return j.data;
+      } catch {
+        return null;
+      }
+    }
+    function saveIndexCache(data){
+      try {
+        localStorage.setItem(INDEX_CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+      } catch {}
+    }
+
     function ymKey(y,m){ return `${y}-${String(m).padStart(2,'0')}`; }
     function renderWeek(){
       const w = $('calWeek');
@@ -692,9 +715,6 @@
 
     async function renderFromGitHub(){
       renderWeek();
-      // Fast path: use notes/index.json (single file)
-      const index = await ghTryGetJson('notes/index.json');
-      notesIndex = index && typeof index === 'object' ? index : { items: [] };
 
       // default month = current
       const now = new Date();
@@ -713,24 +733,47 @@
         viewM -= 1;
         if (viewM <= 0) { viewM = 12; viewY -= 1; }
         rerender();
+        markSelected(selectedDay);
       });
       nextM && (nextM.onclick = () => {
         viewM += 1;
         if (viewM >= 13) { viewM = 1; viewY += 1; }
         rerender();
+        markSelected(selectedDay);
       });
       todayBtn && (todayBtn.onclick = async () => {
         viewY = now.getFullYear();
         viewM = now.getMonth() + 1;
         selectedDay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
         rerender();
+        markSelected(selectedDay);
         await loadDay(selectedDay);
       });
 
       // default open today
       selectedDay = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
-      rerender();
+
+      // instant calendar from cache
+      const cached = loadIndexCache();
+      if (cached && typeof cached === 'object') {
+        notesIndex = cached;
+        rerender();
+        markSelected(selectedDay);
+      }
+
+      // start loading day immediately
       await loadDay(selectedDay);
+
+      // refresh index in background (update cache + rerender)
+      (async () => {
+        const index = await ghTryGetJson('notes/index.json');
+        if (index && typeof index === 'object') {
+          notesIndex = index;
+          saveIndexCache(index);
+          rerender();
+          markSelected(selectedDay);
+        }
+      })();
     }
 
     async function render(){
@@ -832,6 +875,7 @@
         idx.items.unshift({ ts, day, text, images: imgPaths });
         idx.items = idx.items.slice(0, 200);
         await ghPutFile(idxPath, await base64Utf8(JSON.stringify(idx, null, 2)), `Update notes index ${day}`);
+        saveIndexCache(idx);
 
         // update optimistic entry to real image paths
         optimisticEntry.images = imgPaths;
