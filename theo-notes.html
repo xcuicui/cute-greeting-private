@@ -118,8 +118,20 @@
       </div>
 
       <div class="note">
-        提示：这页现在默认先保存在你的浏览器本机（IndexedDB）。
-        我们也支持“同步保存到 GitHub 私有仓库”（需要配置一个 Cloudflare Worker 做安全中转，不用 OAuth）。
+        提示：这页默认先保存在你的浏览器本机（IndexedDB）。
+        如果要保存到 GitHub：建议填 Worker 地址；若 Worker 在你网络下不可用，可填 GitHub Token 走直连。
+      </div>
+
+      <div class="card" style="margin-top:12px">
+        <div class="meta">GitHub 同步设置（仅保存在本机浏览器）</div>
+        <label>Worker API 地址（可选）</label>
+        <textarea id="apiBase" placeholder="例如：https://theo-notes-worker.1906067657.workers.dev" style="min-height:48px"></textarea>
+        <label>GitHub Token（可选，Worker 不可用时用于直连保存）</label>
+        <textarea id="ghToken" placeholder="粘贴 fine-grained token（只授权 theo-notes-vault）" style="min-height:72px"></textarea>
+        <div class="btns">
+          <button id="saveCfg">保存设置</button>
+          <button id="clearCfg">清空设置</button>
+        </div>
       </div>
     </div>
 
@@ -259,6 +271,26 @@
     const GH_OWNER = 'xcuicui';
     const GH_REPO = 'theo-notes-vault';
 
+    // settings UI
+    $('apiBase').value = API_BASE;
+    $('ghToken').value = GH_TOKEN;
+    $('saveCfg').onclick = () => {
+      API_BASE = $('apiBase').value.trim().replace(/\/$/, '');
+      GH_TOKEN = $('ghToken').value.trim();
+      localStorage.setItem('theo_notes_api_base', API_BASE);
+      localStorage.setItem('theo_notes_gh_token', GH_TOKEN);
+      toast('已保存设置');
+    };
+    $('clearCfg').onclick = () => {
+      if (!confirm('确定清空同步设置吗？')) return;
+      API_BASE = '';
+      GH_TOKEN = '';
+      localStorage.removeItem('theo_notes_api_base');
+      localStorage.removeItem('theo_notes_gh_token');
+      $('apiBase').value = '';
+      $('ghToken').value = '';
+      toast('已清空设置');
+    };
     async function base64Utf8(str){
       const bytes = new TextEncoder().encode(str);
       let bin = '';
@@ -356,11 +388,8 @@
 
       // Fallback: direct GitHub API with token stored locally
       if (!GH_TOKEN) {
-        const tok = prompt('无法连接到 Worker。\n\n可选方案：粘贴你的 GitHub Token（仅保存在本机浏览器，不会写进仓库）。\n\n注意：这是敏感信息，不要在公开设备使用。');
-        if (!tok) return;
-        GH_TOKEN = tok.trim();
-        localStorage.setItem('theo_notes_gh_token', GH_TOKEN);
-        // continue without reloading (prevents prompt disappearing issues on mobile)
+        toast('请先在下方「GitHub 同步设置」里填写 GitHub Token（或填写可用的 Worker 地址）');
+        return;
       }
 
       try {
