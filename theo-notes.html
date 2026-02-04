@@ -381,7 +381,11 @@
       const existing = getPass();
       if (existing) {
         const ok = await tryPass(existing);
-        if (ok) return;
+        if (ok) {
+          // If pass is already stored and valid, skip gate and render immediately.
+          render();
+          return;
+        }
         clearPass();
       }
 
