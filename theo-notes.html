@@ -111,14 +111,15 @@
       <input id="photos" type="file" accept="image/*" multiple />
 
       <div class="btns">
-        <button class="primary" id="save">保存这一条</button>
+        <button class="primary" id="save">保存到本机</button>
+        <button class="primary" id="saveGitHub">保存到 GitHub</button>
         <button id="export">导出备份（JSON）</button>
         <button id="clear">清空本机数据</button>
       </div>
 
       <div class="note">
-        提示：这页目前把内容保存在你的浏览器本机（IndexedDB）。清理浏览器数据/换设备会丢失。
-        如果你想跨设备、长期保存，我们可以接入「GitHub Issues / Cloudflare R2+D1 / Supabase」。
+        提示：这页现在默认先保存在你的浏览器本机（IndexedDB）。
+        我们也支持“同步保存到 GitHub 私有仓库”（需要配置一个 Cloudflare Worker 做安全中转，不用 OAuth）。
       </div>
     </div>
 
@@ -238,6 +239,22 @@
       }
     }
 
+    async function readFileAsBase64(file){
+      return new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = () => {
+          const dataUrl = String(r.result || '');
+          const b64 = dataUrl.split(',')[1] || '';
+          resolve(b64);
+        };
+        r.onerror = () => reject(r.error);
+        r.readAsDataURL(file);
+      });
+    }
+
+    // Configure your Worker endpoint here (after deploy)
+    const API_BASE = localStorage.getItem('theo_notes_api_base') || '';
+
     $('save').onclick = async () => {
       const text = $('text').value.trim();
       const files = Array.from($('photos').files || []);
@@ -262,8 +279,46 @@
       await putEntry(entry);
       $('text').value = '';
       $('photos').value = '';
-      toast('已保存～');
+      toast('已保存到本机～');
       await render();
+    };
+
+    $('saveGitHub').onclick = async () => {
+      const text = $('text').value.trim();
+      const files = Array.from($('photos').files || []);
+      if (!text && files.length === 0) {
+        toast('写点什么或传张照片再保存哦～');
+        return;
+      }
+      if (!API_BASE) {
+        const base = prompt('请先粘贴你的 Worker API 地址（例如 https://xxx.workers.dev ）：');
+        if (!base) return;
+        localStorage.setItem('theo_notes_api_base', base.trim().replace(/\/$/,''));
+        location.reload();
+        return;
+      }
+
+      const photos = [];
+      for (const f of files) {
+        const dataBase64 = await readFileAsBase64(f);
+        photos.push({ name: f.name, type: f.type, dataBase64 });
+      }
+
+      const res = await fetch(API_BASE + '/save', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, photos }),
+      });
+
+      if (!res.ok) {
+        const t = await res.text();
+        toast('保存失败：' + t.slice(0, 80));
+        return;
+      }
+
+      $('text').value = '';
+      $('photos').value = '';
+      toast('已保存到 GitHub～');
     };
 
     $('export').onclick = async () => {
