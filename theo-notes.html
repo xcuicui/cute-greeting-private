@@ -253,9 +253,9 @@
     }
 
     // Option A: Cloudflare Worker endpoint (recommended)
-    const API_BASE = localStorage.getItem('theo_notes_api_base') || '';
+    let API_BASE = localStorage.getItem('theo_notes_api_base') || '';
     // Option B (fallback): store a GitHub token locally (NOT stored in repo, but still sensitive)
-    const GH_TOKEN = localStorage.getItem('theo_notes_gh_token') || '';
+    let GH_TOKEN = localStorage.getItem('theo_notes_gh_token') || '';
     const GH_OWNER = 'xcuicui';
     const GH_REPO = 'theo-notes-vault';
 
@@ -358,9 +358,9 @@
       if (!GH_TOKEN) {
         const tok = prompt('无法连接到 Worker。\n\n可选方案：粘贴你的 GitHub Token（仅保存在本机浏览器，不会写进仓库）。\n\n注意：这是敏感信息，不要在公开设备使用。');
         if (!tok) return;
-        localStorage.setItem('theo_notes_gh_token', tok.trim());
-        location.reload();
-        return;
+        GH_TOKEN = tok.trim();
+        localStorage.setItem('theo_notes_gh_token', GH_TOKEN);
+        // continue without reloading (prevents prompt disappearing issues on mobile)
       }
 
       try {
