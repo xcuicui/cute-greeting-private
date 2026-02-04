@@ -1,0 +1,10 @@
+{
+  "v": 1,
+  "alg": "AES-256-GCM",
+  "kdf": "PBKDF2-SHA256",
+  "iter": 150000,
+  "salt": "+bzu8uIgqJk8WsBGaJKONQ==",
+  "iv": "vy4CBPVejr41sMTQ",
+  "ct": "QA52aS69AvwjphHS7nJqRRa3H5DvY7C6sVNSekeoo/XKxOlzPi70JwrW+AvGTar3LB76o1t1Z5/ztyMp9G2XUK29bwXQgJ5nztd8A6qSYVLD8HpK+gYujmEGhqL8",
+  "tag": "cV6kw9KSEXqT3GQwXcKOBQ=="
+}

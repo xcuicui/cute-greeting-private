@@ -76,7 +76,7 @@
       background: rgba(255,255,255,0.68);
       padding: 12px;
     }
-    .meta{font-size:12px; color: rgba(0,0,0,0.48);}
+    .meta{font-size:12px; color: rgba(0,0,0,0.48); word-break: break-all;}
     .text{margin-top:6px; white-space: pre-wrap; font-size:14px; color: rgba(0,0,0,0.72); line-height:1.7;}
     .imgs{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
     .imgs img{width:110px; height:110px; object-fit:cover; border-radius:14px; border:1px solid rgba(0,0,0,0.06)}
@@ -98,7 +98,7 @@
     <div class="top">
       <div>
         <h1>Theo的碎碎念收纳处</h1>
-        <p class="sub">记录心情、状态、生活点滴。先存本机（不联网），以后我们可以把它们一键整理成笔记。</p>
+        <p class="sub">记录心情、状态、生活点滴。</p>
       </div>
       <a class="btn" href="./">返回问候页</a>
     </div>
@@ -111,21 +111,16 @@
       <input id="photos" type="file" accept="image/*" multiple />
 
       <div class="btns">
-        <button class="primary" id="save">保存到本机</button>
         <button class="primary" id="saveGitHub">保存到 GitHub</button>
-        <button id="export">导出备份（JSON）</button>
-        <button id="clear">清空本机数据</button>
       </div>
 
       <div class="note">
-        提示：这页默认先保存在你的浏览器本机（IndexedDB）。
-        如果要保存到 GitHub：建议填 Worker 地址；若 Worker 在你网络下不可用，可填 GitHub Token 走直连。
+        说明：内容会保存到 GitHub 私有仓库（由管理员配置）。页面里不放明文 token。
       </div>
-
     </div>
 
     <div class="card">
-      <div class="meta">已保存的记录</div>
+      <div class="meta">已保存的记录（从仓库读取）</div>
       <div class="list" id="list"></div>
     </div>
   </div>
@@ -142,78 +137,213 @@
       toast._t = setTimeout(() => t.style.display = 'none', 1600);
     };
 
-    // IndexedDB helpers
-    const DB_NAME = 'theo_notes_db';
-    const STORE = 'entries';
+    // --- Passcode gate + encrypted token ---
+    const KEY_STORAGE = 'theo_notes_write_key';
 
-    function openDB(){
-      return new Promise((resolve, reject) => {
-        const req = indexedDB.open(DB_NAME, 1);
-        req.onupgradeneeded = () => {
-          const db = req.result;
-          const st = db.createObjectStore(STORE, { keyPath: 'id' });
-          st.createIndex('ts', 'ts');
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => reject(req.error);
+    function getPass(){
+      try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; }
+    }
+    function setPass(v){
+      try { localStorage.setItem(KEY_STORAGE, v); } catch {}
+    }
+    function clearPass(){
+      try { localStorage.removeItem(KEY_STORAGE); } catch {}
+    }
+
+    async function b64ToBytes(b64){
+      const bin = atob(String(b64).replace(/\n/g,''));
+      const out = new Uint8Array(bin.length);
+      for (let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
+      return out;
+    }
+
+    async function decryptToken(pass){
+      const enc = await fetch('./gh-token.enc.json', { cache: 'no-store' }).then(r=>r.json());
+      const salt = await b64ToBytes(enc.salt);
+      const iv = await b64ToBytes(enc.iv);
+      const ct = await b64ToBytes(enc.ct);
+      const tag = await b64ToBytes(enc.tag);
+      const data = new Uint8Array(ct.length + tag.length);
+      data.set(ct, 0);
+      data.set(tag, ct.length);
+
+      const baseKey = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(pass),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+      );
+
+      const aesKey = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: enc.iter || 150000, hash: 'SHA-256' },
+        baseKey,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+      );
+
+      const pt = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        aesKey,
+        data
+      );
+
+      return new TextDecoder('utf-8').decode(new Uint8Array(pt));
+    }
+
+    // gate overlay
+    const gate = document.createElement('div');
+    gate.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;padding:18px;background:rgba(255,255,255,0.55);backdrop-filter:blur(12px);z-index:99;';
+    gate.innerHTML = `
+      <div style="width:min(520px,100%);border-radius:22px;background:rgba(255,255,255,0.86);border:1px solid rgba(0,0,0,0.06);box-shadow:0 24px 70px rgba(0,0,0,0.12);padding:18px 16px;">
+        <div style="font-size:18px;font-weight:900;color:rgba(0,0,0,0.84)">请输入口令</div>
+        <div style="margin-top:8px;font-size:13px;color:rgba(0,0,0,0.55);line-height:1.6">这是一个小小的朋友专属入口～</div>
+        <input id="keyInput" type="password" placeholder="口令" style="margin-top:12px;width:100%;border-radius:14px;border:1px solid rgba(0,0,0,0.12);padding:10px 12px;font-size:14px;outline:none;background:rgba(255,255,255,0.92);" />
+        <div id="keyErr" style="margin-top:10px;font-size:13px;color:#b0003a;display:none">口令不对哦～</div>
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
+          <button id="keyOk" class="primary" style="border:0;border-radius:999px;padding:10px 14px;font-size:14px;cursor:pointer;background:linear-gradient(135deg,#0b2a78,#5aa7ff);color:#fff;font-weight:800;">进入</button>
+        </div>
+      </div>
+    `;
+
+    let GH_TOKEN = '';
+    const GH_OWNER = 'xcuicui';
+    const GH_REPO = 'theo-notes-vault';
+
+    async function ensurePassAndToken(){
+      const tryPass = async (p) => {
+        try {
+          const tok = await decryptToken(p);
+          // quick sanity check
+          if (!tok || tok.length < 10) throw new Error('bad');
+          GH_TOKEN = tok;
+          setPass(p);
+          return true;
+        } catch {
+          return false;
+        }
+      };
+
+      const existing = getPass();
+      if (existing) {
+        const ok = await tryPass(existing);
+        if (ok) return;
+        clearPass();
+      }
+
+      document.body.appendChild(gate);
+      const input = gate.querySelector('#keyInput');
+      const err = gate.querySelector('#keyErr');
+      const btn = gate.querySelector('#keyOk');
+
+      const submit = async () => {
+        err.style.display = 'none';
+        const v = String(input.value || '').trim();
+        if (!v) return;
+        const ok = await tryPass(v);
+        if (ok) {
+          gate.remove();
+          render();
+        } else {
+          err.style.display = 'block';
+        }
+      };
+
+      btn.onclick = submit;
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+      input.focus();
+    }
+
+    // --- GitHub API helpers ---
+    async function ghFetch(path, opts = {}){
+      const url = `https://api.github.com${path}`;
+      const res = await fetch(url, {
+        ...opts,
+        headers: {
+          'authorization': `Bearer ${GH_TOKEN}`,
+          'accept': 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+          ...(opts.headers || {}),
+        }
+      });
+      if (!res.ok) {
+        const t = await res.text();
+        throw new Error(`${res.status} ${t.slice(0, 200)}`);
+      }
+      return res.json();
+    }
+
+    async function ghPutFile(path, contentBase64, message){
+      const url = `/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path).replaceAll('%2F','/')}?ref=main`;
+      let sha;
+      try {
+        const j = await ghFetch(url);
+        sha = j && j.sha;
+      } catch {}
+
+      const putUrl = `/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path).replaceAll('%2F','/')}`;
+      return ghFetch(putUrl, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message, content: contentBase64, branch: 'main', sha }),
       });
     }
 
-    async function putEntry(entry){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(entry);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
+    async function ghListDir(repoPath){
+      const enc = repoPath.split('/').map(encodeURIComponent).join('/');
+      return ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
     }
 
-    async function getAll(){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readonly');
-        const req = tx.objectStore(STORE).getAll();
-        req.onsuccess = () => resolve(req.result || []);
-        req.onerror = () => reject(req.error);
-      });
+    async function ghGetFile(repoPath){
+      const enc = repoPath.split('/').map(encodeURIComponent).join('/');
+      const j = await ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
+      if (!j || j.type !== 'file') throw new Error('not_file');
+      return { content: j.content, encoding: j.encoding };
     }
 
-    async function clearAll(){
-      const db = await openDB();
-      return new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).clear();
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
+    function b64ToUtf8(b64){
+      const bin = atob(String(b64).replace(/\n/g,''));
+      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+      return new TextDecoder('utf-8').decode(bytes);
     }
 
-    function toDataURL(blob){
-      return new Promise((resolve, reject) => {
-        const r = new FileReader();
-        r.onload = () => resolve(r.result);
-        r.onerror = () => reject(r.error);
-        r.readAsDataURL(blob);
-      });
-    }
-
-    async function renderFromWorker(){
+    async function renderFromGitHub(){
       const list = $('list');
       list.innerHTML = '<div class="meta">正在从 GitHub 读取…</div>';
 
-      const res = await authedFetch('/list?limit=30');
-      if (!res.ok) throw new Error(await res.text());
-      const j = await res.json();
-      const items = j.items || [];
-
-      list.innerHTML = '';
-      if (!items.length) {
+      let root;
+      try {
+        root = await ghListDir('notes');
+      } catch {
         list.innerHTML = '<div class="meta">还没有记录～</div>';
         return;
       }
 
-      for (const it of items) {
+      const mdFiles = [];
+      for (const day of root) {
+        if (day.type !== 'dir') continue;
+        const dayName = day.name;
+        try {
+          const dayList = await ghListDir(`notes/${dayName}`);
+          for (const f of dayList) {
+            if (f.type === 'file' && f.name.endsWith('.md')) {
+              mdFiles.push({ day: dayName, path: `notes/${dayName}/${f.name}` });
+            }
+          }
+        } catch {}
+      }
+
+      mdFiles.sort((a,b) => (b.path).localeCompare(a.path));
+      const show = mdFiles.slice(0, 30);
+
+      list.innerHTML = '';
+      if (!show.length) {
+        list.innerHTML = '<div class="meta">还没有记录～</div>';
+        return;
+      }
+
+      for (const it of show) {
         const div = document.createElement('div');
         div.className = 'item';
 
@@ -221,21 +351,34 @@
         meta.className = 'meta';
         meta.textContent = it.path;
 
+        const file = await ghGetFile(it.path);
+        const md = file.encoding === 'base64' ? b64ToUtf8(file.content) : '';
+
         const text = document.createElement('div');
         text.className = 'text';
-        text.textContent = it.text || '';
+        text.textContent = md.replace(/^#.*\n+/, '').trim();
 
         div.appendChild(meta);
         if (text.textContent) div.appendChild(text);
 
-        if (it.images && it.images.length) {
+        const imgMatches = Array.from(md.matchAll(/!\[]\((images\/[^)]+)\)/g)).map(m => m[1]);
+        if (imgMatches.length) {
           const imgs = document.createElement('div');
           imgs.className = 'imgs';
-          for (const rel of it.images.slice(0, 6)) {
-            const img = document.createElement('img');
-            img.alt = 'photo';
-            img.src = API_BASE + '/file?path=' + encodeURIComponent(`notes/${it.day}/${rel}`) + '&k=' + encodeURIComponent(getKey());
-            imgs.appendChild(img);
+          for (const rel of imgMatches.slice(0, 6)) {
+            const imgPath = `notes/${it.day}/${rel}`;
+            try {
+              const imgFile = await ghGetFile(imgPath);
+              const b64 = String(imgFile.content || '').replace(/\n/g,'');
+              const bin = atob(b64);
+              const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+              const blob = new Blob([bytes]);
+              const url = URL.createObjectURL(blob);
+              const img = document.createElement('img');
+              img.alt = 'photo';
+              img.src = url;
+              imgs.appendChild(img);
+            } catch {}
           }
           div.appendChild(imgs);
         }
@@ -245,43 +388,10 @@
     }
 
     async function render(){
-      try {
-        await renderFromWorker();
-      } catch (e) {
-        console.warn('renderFromWorker failed', e);
-        // fallback to local
-        const list = $('list');
-        const items = (await getAll()).sort((a,b) => b.ts - a.ts);
-        list.innerHTML = '';
-        if (!items.length) {
-          list.innerHTML = '<div class="meta">还没有记录～</div>';
-          return;
-        }
-        for (const it of items) {
-          const div = document.createElement('div');
-          div.className = 'item';
-          const dt = new Date(it.ts);
-          const meta = document.createElement('div');
-          meta.className = 'meta';
-          meta.textContent = dt.toLocaleString('zh-CN');
-          const text = document.createElement('div');
-          text.className = 'text';
-          text.textContent = it.text || '';
-          div.appendChild(meta);
-          if (it.text) div.appendChild(text);
-          if (it.photos && it.photos.length) {
-            const imgs = document.createElement('div');
-            imgs.className = 'imgs';
-            for (const p of it.photos) {
-              const img = document.createElement('img');
-              img.alt = 'photo';
-              img.src = await toDataURL(p);
-              imgs.appendChild(img);
-            }
-            div.appendChild(imgs);
-          }
-          list.appendChild(div);
-        }
+      try { await renderFromGitHub(); }
+      catch (e) {
+        console.warn(e);
+        $('list').innerHTML = '<div class="meta">读取失败（请确认口令正确）</div>';
       }
     }
 
@@ -298,132 +408,12 @@
       });
     }
 
-    // Cloudflare Worker endpoint (admin configured once)
-    const API_BASE = 'https://theo-notes-worker.1906067657.workers.dev';
-    const KEY_STORAGE = 'theo_notes_write_key';
-
-    function getKey(){
-      try { return localStorage.getItem(KEY_STORAGE) || ''; } catch { return ''; }
-    }
-    function setKey(v){
-      try { localStorage.setItem(KEY_STORAGE, v); } catch {}
-    }
-    function clearKey(){
-      try { localStorage.removeItem(KEY_STORAGE); } catch {}
-    }
-
-    // gate UI
-    const gate = document.createElement('div');
-    gate.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;padding:18px;background:rgba(255,255,255,0.55);backdrop-filter:blur(12px);z-index:99;';
-    gate.innerHTML = `
-      <div style="width:min(520px,100%);border-radius:22px;background:rgba(255,255,255,0.86);border:1px solid rgba(0,0,0,0.06);box-shadow:0 24px 70px rgba(0,0,0,0.12);padding:18px 16px;">
-        <div style="font-size:18px;font-weight:900;color:rgba(0,0,0,0.84)">请输入口令</div>
-        <div style="margin-top:8px;font-size:13px;color:rgba(0,0,0,0.55);line-height:1.6">这是一个小小的朋友专属入口～</div>
-        <input id="keyInput" type="password" placeholder="口令" style="margin-top:12px;width:100%;border-radius:14px;border:1px solid rgba(0,0,0,0.12);padding:10px 12px;font-size:14px;outline:none;background:rgba(255,255,255,0.92);" />
-        <div id="keyErr" style="margin-top:10px;font-size:13px;color:#b0003a;display:none">口令不对哦～</div>
-        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end">
-          <button id="keyOk" class="primary" style="border:0;border-radius:999px;padding:10px 14px;font-size:14px;cursor:pointer;background:linear-gradient(135deg,#0b2a78,#5aa7ff);color:#fff;font-weight:800;">进入</button>
-        </div>
-      </div>
-    `;
-
-    async function authedFetch(path, init = {}){
-      const key = getKey();
-      const headers = { ...(init.headers || {}), 'x-write-key': key };
-      return fetch(API_BASE + path, { ...init, headers });
-    }
-
-    async function checkKey(){
-      const res = await authedFetch('/list?limit=1', { method: 'GET' });
-      return res.ok;
-    }
-
-    async function ensureKey(){
-      const existing = getKey();
-      if (existing) {
-        const ok = await checkKey().catch(()=>false);
-        if (ok) return;
-        clearKey();
-      }
-      document.body.appendChild(gate);
-      const input = gate.querySelector('#keyInput');
-      const err = gate.querySelector('#keyErr');
-      const btn = gate.querySelector('#keyOk');
-      const submit = async () => {
-        err.style.display = 'none';
-        const v = String(input.value || '').trim();
-        if (!v) return;
-        setKey(v);
-        const ok = await checkKey().catch(()=>false);
-        if (ok) {
-          gate.remove();
-          render();
-        } else {
-          clearKey();
-          err.style.display = 'block';
-        }
-      };
-      btn.onclick = submit;
-      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-      input.focus();
-    }
-
     async function base64Utf8(str){
       const bytes = new TextEncoder().encode(str);
       let bin = '';
       bytes.forEach(b => bin += String.fromCharCode(b));
       return btoa(bin);
     }
-
-    async function ghPutFile(path, contentBase64, message){
-      const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${encodeURIComponent(path).replaceAll('%2F','/')}`;
-      const headers = {
-        'authorization': `Bearer ${GH_TOKEN}`,
-        'accept': 'application/vnd.github+json',
-        'x-github-api-version': '2022-11-28',
-      };
-      let sha;
-      const getRes = await fetch(url, { headers });
-      if (getRes.ok) {
-        const j = await getRes.json();
-        sha = j && j.sha;
-      }
-      const putRes = await fetch(url, {
-        method: 'PUT',
-        headers: { ...headers, 'content-type': 'application/json' },
-        body: JSON.stringify({ message, content: contentBase64, branch: 'main', sha }),
-      });
-      if (!putRes.ok) throw new Error(await putRes.text());
-      return putRes.json();
-    }
-
-    $('save').onclick = async () => {
-      const text = $('text').value.trim();
-      const files = Array.from($('photos').files || []);
-      if (!text && files.length === 0) {
-        toast('写点什么或传张照片再保存哦～');
-        return;
-      }
-
-      const photos = [];
-      for (const f of files) {
-        // store as Blob
-        photos.push(f.slice(0, f.size, f.type));
-      }
-
-      const entry = {
-        id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + '_' + Math.random().toString(16).slice(2),
-        ts: Date.now(),
-        text,
-        photos,
-      };
-
-      await putEntry(entry);
-      $('text').value = '';
-      $('photos').value = '';
-      toast('已保存到本机～');
-      await render();
-    };
 
     $('saveGitHub').onclick = async () => {
       const text = $('text').value.trim();
@@ -433,23 +423,37 @@
         return;
       }
 
-      const photos = [];
-      for (const f of files) {
-        const dataBase64 = await readFileAsBase64(f);
-        photos.push({ name: f.name, type: f.type, dataBase64 });
-      }
-
       try {
-        const res = await authedFetch('/save', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ text, photos }),
-        });
+        const ts = Date.now();
+        const d = new Date(ts);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        const HH = String(d.getHours()).padStart(2,'0');
+        const MM = String(d.getMinutes()).padStart(2,'0');
+        const SS = String(d.getSeconds()).padStart(2,'0');
+        const dayDir = `notes/${yyyy}-${mm}-${dd}`;
+        const stamp = `${HH}${MM}${SS}`;
 
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(t);
+        const imgPaths = [];
+        for (let i=0;i<files.length;i++) {
+          const f = files[i];
+          const b64 = await readFileAsBase64(f);
+          const ext = (f.name.split('.').pop() || '').toLowerCase() || (f.type==='image/jpeg'?'jpg':f.type==='image/png'?'png':'bin');
+          const path = `${dayDir}/images/${stamp}-${i+1}.${ext}`;
+          imgPaths.push(path);
+          await ghPutFile(path, b64, `Add photo ${yyyy}-${mm}-${dd} ${stamp} #${i+1}`);
         }
+
+        const md = [
+          `# ${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}` ,
+          '',
+          text || '',
+          '',
+          ...(imgPaths.length ? ['## Photos','', ...imgPaths.map(p=>`![](${p.replace(dayDir+'/','')})`), ''] : [])
+        ].join('\n');
+
+        await ghPutFile(`${dayDir}/${stamp}.md`, await base64Utf8(md), `Add note ${yyyy}-${mm}-${dd} ${stamp}`);
 
         $('text').value = '';
         $('photos').value = '';
@@ -460,36 +464,7 @@
       }
     };
 
-    $('export').onclick = async () => {
-      const items = (await getAll()).sort((a,b) => a.ts - b.ts);
-      // Convert blobs to base64 data URLs for export
-      const out = [];
-      for (const it of items) {
-        const photos = [];
-        for (const p of (it.photos || [])) {
-          photos.push(await toDataURL(p));
-        }
-        out.push({ id: it.id, ts: it.ts, text: it.text || '', photos });
-      }
-      const json = JSON.stringify(out, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `theo-notes-${new Date().toISOString().slice(0,10)}.json`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast('已导出备份');
-    };
-
-    $('clear').onclick = async () => {
-      if (!confirm('确定清空本机所有记录吗？')) return;
-      await clearAll();
-      toast('已清空');
-      await render();
-    };
-
-    render();
+    ensurePassAndToken();
   </script>
 </body>
 </html>
