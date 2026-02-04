@@ -93,37 +93,6 @@
       font-size: 13px;
       color: rgba(0,0,0,0.52);
     }
-    .btns {
-      position: relative;
-      margin-top: 16px;
-      display: flex;
-      gap: 10px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    button {
-      border: 0;
-      border-radius: 999px;
-      padding: 10px 14px;
-      font-size: 14px;
-      cursor: pointer;
-      background: rgba(255,255,255,0.82);
-      box-shadow: 0 10px 24px rgba(0,0,0,0.08);
-      color: rgba(0,0,0,0.78);
-      user-select: none;
-      -webkit-tap-highlight-color: transparent;
-      touch-action: manipulation;
-      transition: transform 120ms ease, box-shadow 120ms ease;
-    }
-    button:hover { transform: translateY(-1px); box-shadow: 0 14px 30px rgba(0,0,0,0.10); }
-    button:active { transform: translateY(0px) scale(0.99); }
-
-    button.primary {
-      background: linear-gradient(135deg, #0b2a78, #5aa7ff);
-      color: #fff;
-      font-weight: 800;
-      box-shadow: 0 14px 34px rgba(30,90,191,0.26);
-    }
     .tiny {
       position: relative;
       margin-top: 14px;
@@ -134,6 +103,30 @@
     /* little “pop” effect when changing text */
     .pop { animation: pop 180ms ease-out; }
     @keyframes pop { from { transform: scale(0.985); opacity: 0.7; } to { transform: scale(1); opacity: 1; } }
+
+    /* click burst */
+    .burst{ position: fixed; inset: 0; pointer-events: none; z-index: 30; }
+    .bheart{
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: var(--x);
+      top: var(--y);
+      transform: translate(-50%, -50%) scale(var(--s, 1));
+      background: linear-gradient(135deg, rgba(11,42,120,1), rgba(90,167,255,1));
+      filter: drop-shadow(0 12px 18px rgba(11,42,120,0.22));
+      opacity: 0;
+      animation: bheart 900ms ease-out forwards;
+      -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 29'%3E%3Cpath d='M23.6 0c-2.8 0-5.2 1.6-6.6 3.9C15.6 1.6 13.2 0 10.4 0 4.7 0 0 4.7 0 10.4c0 9.4 16.1 18.6 16.1 18.6S32 19.8 32 10.4C32 4.7 27.3 0 23.6 0z'/%3E%3C/svg%3E");
+      -webkit-mask-repeat:no-repeat; -webkit-mask-size:contain; -webkit-mask-position:center;
+      mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 29'%3E%3Cpath d='M23.6 0c-2.8 0-5.2 1.6-6.6 3.9C15.6 1.6 13.2 0 10.4 0 4.7 0 0 4.7 0 10.4c0 9.4 16.1 18.6 16.1 18.6S32 19.8 32 10.4C32 4.7 27.3 0 23.6 0z'/%3E%3C/svg%3E");
+      mask-repeat:no-repeat; mask-size:contain; mask-position:center;
+    }
+    @keyframes bheart{
+      0%{ opacity: 0; transform: translate(-50%,-50%) scale(0.65) translate(0,0); }
+      12%{ opacity: 1; }
+      100%{ opacity: 0; transform: translate(-50%,-50%) scale(1.15) translate(var(--dx), var(--dy)); }
+    }
   </style>
 </head>
 <body>
@@ -142,12 +135,10 @@
     <p class="msg" id="greet"></p>
     <span class="sign" id="sign"></span>
 
-    <div class="btns">
-      <button class="primary" id="btnNew">换一句</button>
-      <button id="btnCopy">复制这句</button>
-    </div>
-
+    <div class="tiny">左右滑动切换 · 轻点屏幕会爆出蓝色小心心</div>
     <div class="tiny" id="time"></div>
+
+    <div class="burst" id="burst"></div>
   </main>
 
   <script src="./data.obf.js"></script>
@@ -178,8 +169,12 @@
       el.classList.add('pop');
     }
 
-    function pickOne() {
-      const pick = lines[Math.floor(Math.random() * lines.length)];
+    // deterministic shuffle index
+    let idx = Math.floor(Math.random() * lines.length);
+
+    function showAt(i) {
+      idx = (i + lines.length) % lines.length;
+      const pick = lines[idx];
       const who = String(pick.t || '').split(/[，,]/)[0] || '你';
       titleEl.textContent = `给${who}的小问候`;
       greetEl.textContent = pick.t;
@@ -188,22 +183,71 @@
       return `${pick.t}\n— ${pick.s}`;
     }
 
-    let current = pickOne();
+    let current = showAt(idx);
 
-    document.getElementById('btnNew').onclick = () => {
-      current = pickOne();
-    };
+    function next() { current = showAt(idx + 1); }
+    function prev() { current = showAt(idx - 1); }
 
-    document.getElementById('btnCopy').onclick = async () => {
-      try {
-        await navigator.clipboard.writeText(current);
-        document.getElementById('btnCopy').textContent = '已复制';
-        setTimeout(() => (document.getElementById('btnCopy').textContent = '复制这句'), 900);
-      } catch {
-        // fallback
-        prompt('复制这句：', current);
+    // swipe handling
+    let startX = 0, startY = 0, moved = 0;
+    const SWIPE_MIN = 35;
+
+    const root = document.body;
+    root.addEventListener('touchstart', (e) => {
+      if (!e.touches?.length) return;
+      const t = e.touches[0];
+      startX = t.clientX; startY = t.clientY; moved = 0;
+    }, { passive: true });
+
+    root.addEventListener('touchmove', (e) => {
+      if (!e.touches?.length) return;
+      const t = e.touches[0];
+      moved = Math.max(moved, Math.abs(t.clientX - startX) + Math.abs(t.clientY - startY));
+    }, { passive: true });
+
+    root.addEventListener('touchend', (e) => {
+      const t = e.changedTouches && e.changedTouches[0];
+      if (!t) return;
+      const dx = t.clientX - startX;
+      const dy = t.clientY - startY;
+      if (Math.abs(dx) > Math.abs(dy) && Math.abs(dx) > SWIPE_MIN) {
+        dx < 0 ? next() : prev();
       }
-    };
+    }, { passive: true });
+
+    // click burst (only if it wasn't a swipe)
+    const burst = document.getElementById('burst');
+    function heartBurst(x, y) {
+      if (!burst) return;
+      const n = 10;
+      for (let i = 0; i < n; i++) {
+        const h = document.createElement('div');
+        h.className = 'bheart';
+        const ang = (Math.PI * 2 * i) / n + (Math.random() * 0.35);
+        const dist = 60 + Math.random() * 28;
+        const dx = Math.cos(ang) * dist;
+        const dy = Math.sin(ang) * dist;
+        h.style.setProperty('--x', x + 'px');
+        h.style.setProperty('--y', y + 'px');
+        h.style.setProperty('--dx', dx + 'px');
+        h.style.setProperty('--dy', dy + 'px');
+        h.style.setProperty('--s', (0.85 + Math.random() * 0.7).toFixed(2));
+        burst.appendChild(h);
+        setTimeout(() => h.remove(), 1000);
+      }
+    }
+
+    root.addEventListener('click', (e) => {
+      // On mobile, if swipe happened, moved will be > SWIPE_MIN.
+      if (moved > SWIPE_MIN) return;
+      heartBurst(e.clientX, e.clientY);
+    });
+
+    // keyboard
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowLeft') prev();
+      if (e.key === 'ArrowRight') next();
+    });
 
     const now = new Date();
     timeEl.textContent = `打开时间：${now.toLocaleString('zh-CN')}`;
