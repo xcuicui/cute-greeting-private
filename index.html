@@ -106,7 +106,10 @@
     function decodeLines() {
       const rev = chunks.join('');
       const b64 = rev.split('').reverse().join('');
-      const json = atob(b64);
+      // atob gives a binary string (latin1). Convert to bytes -> UTF-8 string.
+      const bin = atob(b64);
+      const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+      const json = new TextDecoder('utf-8').decode(bytes);
       return JSON.parse(json);
     }
     const lines = decodeLines();
