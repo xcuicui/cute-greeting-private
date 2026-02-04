@@ -122,17 +122,6 @@
         如果要保存到 GitHub：建议填 Worker 地址；若 Worker 在你网络下不可用，可填 GitHub Token 走直连。
       </div>
 
-      <div class="card" style="margin-top:12px">
-        <div class="meta">GitHub 同步设置（仅保存在本机浏览器）</div>
-        <label>Worker API 地址（可选）</label>
-        <textarea id="apiBase" placeholder="例如：https://theo-notes-worker.1906067657.workers.dev" style="min-height:48px"></textarea>
-        <label>GitHub Token（可选，Worker 不可用时用于直连保存）</label>
-        <textarea id="ghToken" placeholder="粘贴 fine-grained token（只授权 theo-notes-vault）" style="min-height:72px"></textarea>
-        <div class="btns">
-          <button id="saveCfg">保存设置</button>
-          <button id="clearCfg">清空设置</button>
-        </div>
-      </div>
     </div>
 
     <div class="card">
@@ -209,138 +198,15 @@
       });
     }
 
-    // --- GitHub read helpers (for showing content from repo) ---
-    async function ghFetch(path, opts = {}){
-      if (!GH_TOKEN) throw new Error('missing_token');
-      const url = `https://api.github.com${path}`;
-      const res = await fetch(url, {
-        ...opts,
-        headers: {
-          'authorization': `Bearer ${GH_TOKEN}`,
-          'accept': 'application/vnd.github+json',
-          'x-github-api-version': '2022-11-28',
-          ...(opts.headers || {}),
-        }
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`${res.status} ${t.slice(0, 200)}`);
-      }
-      return res.json();
-    }
-
-    function b64ToUtf8(b64){
-      const bin = atob(b64);
-      const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-      return new TextDecoder('utf-8').decode(bytes);
-    }
-
-    async function ghListDir(repoPath){
-      // repoPath without leading slash, e.g. "notes" or "notes/2026-02-04"
-      const enc = repoPath.split('/').map(encodeURIComponent).join('/');
-      return ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
-    }
-
-    async function ghGetFile(repoPath){
-      const enc = repoPath.split('/').map(encodeURIComponent).join('/');
-      const j = await ghFetch(`/repos/${GH_OWNER}/${GH_REPO}/contents/${enc}?ref=main`);
-      if (!j || j.type !== 'file') throw new Error('not_file');
-      return { content: j.content, encoding: j.encoding, download_url: j.download_url };
-    }
-
-    async function renderFromGitHub(){
+    async function renderFromWorker(){
       const list = $('list');
       list.innerHTML = '<div class="meta">正在从 GitHub 读取…</div>';
 
-      let root;
-      try {
-        root = await ghListDir('notes');
-      } catch (e) {
-        list.innerHTML = '<div class="meta">GitHub 仓库里还没有 notes/ 目录～</div>';
-        return;
-      }
+      const res = await fetch(API_BASE + '/list?limit=30');
+      if (!res.ok) throw new Error(await res.text());
+      const j = await res.json();
+      const items = j.items || [];
 
-      // collect md files (depth: notes/YYYY-MM-DD/*.md)
-      const mdFiles = [];
-      for (const day of root) {
-        if (day.type !== 'dir') continue;
-        const dayName = day.name;
-        try {
-          const dayList = await ghListDir(`notes/${dayName}`);
-          for (const f of dayList) {
-            if (f.type === 'file' && f.name.endsWith('.md')) {
-              mdFiles.push({ day: dayName, name: f.name, path: `notes/${dayName}/${f.name}` });
-            }
-          }
-        } catch {}
-      }
-
-      mdFiles.sort((a,b) => (b.path).localeCompare(a.path));
-      const show = mdFiles.slice(0, 30);
-
-      list.innerHTML = '';
-      if (!show.length) {
-        list.innerHTML = '<div class="meta">还没有记录～</div>';
-        return;
-      }
-
-      for (const it of show) {
-        const div = document.createElement('div');
-        div.className = 'item';
-
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        meta.textContent = it.path;
-
-        const file = await ghGetFile(it.path);
-        const md = file.encoding === 'base64' ? b64ToUtf8(String(file.content || '').replace(/\n/g,'')) : '';
-
-        const text = document.createElement('div');
-        text.className = 'text';
-        // naive render: strip leading title, keep remaining text. (We can improve later.)
-        text.textContent = md.replace(/^#.*\n+/, '').trim();
-
-        div.appendChild(meta);
-        if (text.textContent) div.appendChild(text);
-
-        // show images if present (parse ![](images/...))
-        const imgMatches = Array.from(md.matchAll(/!\[]\((images\/[^)]+)\)/g)).map(m => m[1]);
-        if (imgMatches.length) {
-          const imgs = document.createElement('div');
-          imgs.className = 'imgs';
-          for (const rel of imgMatches.slice(0, 6)) {
-            const imgPath = `notes/${it.day}/${rel}`;
-            try {
-              const imgFile = await ghGetFile(imgPath);
-              const b64 = String(imgFile.content || '').replace(/\n/g,'');
-              const bin = atob(b64);
-              const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-              const blob = new Blob([bytes]);
-              const url = URL.createObjectURL(blob);
-              const img = document.createElement('img');
-              img.alt = 'photo';
-              img.src = url;
-              imgs.appendChild(img);
-            } catch {}
-          }
-          div.appendChild(imgs);
-        }
-
-        list.appendChild(div);
-      }
-    }
-
-    async function render(){
-      // Prefer GitHub view if token exists
-      if (GH_TOKEN) {
-        try { await renderFromGitHub(); return; } catch (e) {
-          console.warn('renderFromGitHub failed', e);
-          // fall back to local
-        }
-      }
-
-      const list = $('list');
-      const items = (await getAll()).sort((a,b) => b.ts - a.ts);
       list.innerHTML = '';
       if (!items.length) {
         list.innerHTML = '<div class="meta">还没有记录～</div>';
@@ -351,31 +217,71 @@
         const div = document.createElement('div');
         div.className = 'item';
 
-        const dt = new Date(it.ts);
         const meta = document.createElement('div');
         meta.className = 'meta';
-        meta.textContent = dt.toLocaleString('zh-CN');
+        meta.textContent = it.path;
 
         const text = document.createElement('div');
         text.className = 'text';
         text.textContent = it.text || '';
 
         div.appendChild(meta);
-        if (it.text) div.appendChild(text);
+        if (text.textContent) div.appendChild(text);
 
-        if (it.photos && it.photos.length) {
+        if (it.images && it.images.length) {
           const imgs = document.createElement('div');
           imgs.className = 'imgs';
-          for (const p of it.photos) {
+          for (const rel of it.images.slice(0, 6)) {
             const img = document.createElement('img');
             img.alt = 'photo';
-            img.src = await toDataURL(p);
+            img.src = API_BASE + '/file?path=' + encodeURIComponent(`notes/${it.day}/${rel}`);
             imgs.appendChild(img);
           }
           div.appendChild(imgs);
         }
 
         list.appendChild(div);
+      }
+    }
+
+    async function render(){
+      try {
+        await renderFromWorker();
+      } catch (e) {
+        console.warn('renderFromWorker failed', e);
+        // fallback to local
+        const list = $('list');
+        const items = (await getAll()).sort((a,b) => b.ts - a.ts);
+        list.innerHTML = '';
+        if (!items.length) {
+          list.innerHTML = '<div class="meta">还没有记录～</div>';
+          return;
+        }
+        for (const it of items) {
+          const div = document.createElement('div');
+          div.className = 'item';
+          const dt = new Date(it.ts);
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          meta.textContent = dt.toLocaleString('zh-CN');
+          const text = document.createElement('div');
+          text.className = 'text';
+          text.textContent = it.text || '';
+          div.appendChild(meta);
+          if (it.text) div.appendChild(text);
+          if (it.photos && it.photos.length) {
+            const imgs = document.createElement('div');
+            imgs.className = 'imgs';
+            for (const p of it.photos) {
+              const img = document.createElement('img');
+              img.alt = 'photo';
+              img.src = await toDataURL(p);
+              imgs.appendChild(img);
+            }
+            div.appendChild(imgs);
+          }
+          list.appendChild(div);
+        }
       }
     }
 
@@ -392,33 +298,8 @@
       });
     }
 
-    // Option A: Cloudflare Worker endpoint (recommended)
-    let API_BASE = localStorage.getItem('theo_notes_api_base') || '';
-    // Option B (fallback): store a GitHub token locally (NOT stored in repo, but still sensitive)
-    let GH_TOKEN = localStorage.getItem('theo_notes_gh_token') || '';
-    const GH_OWNER = 'xcuicui';
-    const GH_REPO = 'theo-notes-vault';
-
-    // settings UI
-    $('apiBase').value = API_BASE;
-    $('ghToken').value = GH_TOKEN;
-    $('saveCfg').onclick = () => {
-      API_BASE = $('apiBase').value.trim().replace(/\/$/, '');
-      GH_TOKEN = $('ghToken').value.trim();
-      localStorage.setItem('theo_notes_api_base', API_BASE);
-      localStorage.setItem('theo_notes_gh_token', GH_TOKEN);
-      toast('已保存设置');
-    };
-    $('clearCfg').onclick = () => {
-      if (!confirm('确定清空同步设置吗？')) return;
-      API_BASE = '';
-      GH_TOKEN = '';
-      localStorage.removeItem('theo_notes_api_base');
-      localStorage.removeItem('theo_notes_gh_token');
-      $('apiBase').value = '';
-      $('ghToken').value = '';
-      toast('已清空设置');
-    };
+    // Cloudflare Worker endpoint (admin configured once)
+    const API_BASE = 'https://theo-notes-worker.1906067657.workers.dev';
     async function base64Utf8(str){
       const bytes = new TextEncoder().encode(str);
       let bin = '';
@@ -484,74 +365,23 @@
         return;
       }
 
-      // First try Worker mode if configured
-      if (API_BASE) {
-        const photos = [];
-        for (const f of files) {
-          const dataBase64 = await readFileAsBase64(f);
-          photos.push({ name: f.name, type: f.type, dataBase64 });
-        }
-
-        try {
-          const res = await fetch(API_BASE + '/save', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text, photos }),
-          });
-
-          if (!res.ok) {
-            const t = await res.text();
-            throw new Error(t);
-          }
-
-          $('text').value = '';
-          $('photos').value = '';
-          toast('已保存到 GitHub～');
-          render();
-          return;
-        } catch (e) {
-          // fall through to direct token mode
-          console.warn('worker save failed', e);
-        }
-      }
-
-      // Fallback: direct GitHub API with token stored locally
-      if (!GH_TOKEN) {
-        toast('请先在下方「GitHub 同步设置」里填写 GitHub Token（或填写可用的 Worker 地址）');
-        return;
+      const photos = [];
+      for (const f of files) {
+        const dataBase64 = await readFileAsBase64(f);
+        photos.push({ name: f.name, type: f.type, dataBase64 });
       }
 
       try {
-        const ts = Date.now();
-        const d = new Date(ts);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth()+1).padStart(2,'0');
-        const dd = String(d.getDate()).padStart(2,'0');
-        const HH = String(d.getHours()).padStart(2,'0');
-        const MM = String(d.getMinutes()).padStart(2,'0');
-        const SS = String(d.getSeconds()).padStart(2,'0');
-        const dayDir = `notes/${yyyy}-${mm}-${dd}`;
-        const stamp = `${HH}${MM}${SS}`;
+        const res = await fetch(API_BASE + '/save', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ text, photos }),
+        });
 
-        const imgPaths = [];
-        for (let i=0;i<files.length;i++) {
-          const f = files[i];
-          const b64 = await readFileAsBase64(f);
-          const ext = (f.name.split('.').pop() || '').toLowerCase() || (f.type==='image/jpeg'?'jpg':f.type==='image/png'?'png':'bin');
-          const path = `${dayDir}/images/${stamp}-${i+1}.${ext}`;
-          imgPaths.push(path);
-          await ghPutFile(path, b64, `Add photo ${yyyy}-${mm}-${dd} ${stamp} #${i+1}`);
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(t);
         }
-
-        const md = [
-          `# ${yyyy}-${mm}-${dd} ${HH}:${MM}:${SS}` ,
-          '',
-          text || '',
-          '',
-          ...(imgPaths.length ? ['## Photos','', ...imgPaths.map(p=>`![](${p.replace(dayDir+'/','')})`), ''] : [])
-        ].join('\n');
-
-        await ghPutFile(`${dayDir}/${stamp}.md`, await base64Utf8(md), `Add note ${yyyy}-${mm}-${dd} ${stamp}`);
 
         $('text').value = '';
         $('photos').value = '';
